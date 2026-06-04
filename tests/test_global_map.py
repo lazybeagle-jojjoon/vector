@@ -179,6 +179,147 @@ def test_global_map_reads_period_returns_keyed_by_security_id(tmp_path):
     assert row_by_symbol["BBB"]["period_return"].startswith("0.03")
 
 
+def test_global_map_market_cap_overlay_records_coverage_and_preserves_edges(tmp_path):
+    pytest.importorskip("numpy")
+    snapshot = tmp_path / "snapshot_2025"
+    metadata_csv = tmp_path / "node_metadata.csv"
+    _write_snapshot(
+        snapshot,
+        period_start="2025-01-01",
+        period_end="2025-12-31",
+        universe_rows=[
+            ("SEC:AAA", "AAA"),
+            ("SEC:BBB", "BBB"),
+            ("SEC:CCC", "CCC"),
+        ],
+        neighbor_rows=[
+            ("SEC:AAA", "AAA", 1, "BBB", "SEC:BBB", 0.90, 0.10),
+            ("SEC:BBB", "BBB", 1, "AAA", "SEC:AAA", 0.90, 0.10),
+        ],
+        return_rows=[("2025-01-02", {"AAA": 0.01, "BBB": 0.02, "CCC": -0.01})],
+    )
+    _write_metadata_csv(
+        metadata_csv,
+        [
+            {
+                "symbol": "AAA",
+                "market_cap": "1000000000",
+                "market_cap_status": "positive",
+                "market_cap_source": "raw_highlights_market_capitalization",
+                "market_cap_currency": "USD",
+                "market_cap_label": "raw/current/as-of-fetch",
+            },
+            {
+                "symbol": "BBB",
+                "market_cap": "",
+                "market_cap_status": "zero",
+                "market_cap_source": "raw_highlights_market_capitalization",
+                "market_cap_currency": "USD",
+                "market_cap_label": "raw/current/as-of-fetch",
+            },
+        ],
+    )
+
+    with_overlay = write_global_map_view(
+        snapshot,
+        output_dir=tmp_path / "global_with_overlay",
+        node_metadata_path=metadata_csv,
+        top_k=1,
+        seed=11,
+        iterations=4,
+    )
+    without_overlay = write_global_map_view(
+        snapshot,
+        output_dir=tmp_path / "global_without_overlay",
+        top_k=1,
+        seed=11,
+        iterations=4,
+    )
+
+    metadata = json.loads(with_overlay.metadata_path.read_text(encoding="utf-8"))
+    assert metadata["market_cap_overlay"]["label"] == "raw/current/as-of-fetch"
+    assert metadata["market_cap_overlay"]["positive_count"] == 1
+    assert metadata["market_cap_overlay"]["zero_count"] == 1
+    assert metadata["market_cap_overlay"]["missing_count"] == 1
+    assert metadata["market_cap_overlay"]["coverage_rate"] == pytest.approx(1 / 3)
+    assert metadata["market_cap_overlay"]["size_scale"] == "log_current_market_cap"
+
+    layout_rows = _read_csv(with_overlay.layout_path)
+    row_by_symbol = {row["symbol"]: row for row in layout_rows}
+    assert row_by_symbol["AAA"]["market_cap"] == "1000000000"
+    assert row_by_symbol["AAA"]["market_cap_status"] == "positive"
+    assert row_by_symbol["BBB"]["market_cap"] == ""
+    assert row_by_symbol["BBB"]["market_cap_status"] == "zero"
+    assert row_by_symbol["CCC"]["market_cap_status"] == "missing"
+
+    assert _read_csv(with_overlay.edges_path) == _read_csv(without_overlay.edges_path)
+    html = with_overlay.html_path.read_text(encoding="utf-8")
+    assert "raw/current/as-of-fetch" in html
+    assert "missing or zero market cap" in html
+    assert "marketCapRadius" in html
+
+
+def test_global_map_html_includes_filter_controls_without_changing_edges(tmp_path):
+    pytest.importorskip("numpy")
+    snapshot = tmp_path / "snapshot_2025"
+    metadata_csv = tmp_path / "node_metadata.csv"
+    _write_snapshot(
+        snapshot,
+        period_start="2025-01-01",
+        period_end="2025-12-31",
+        universe_rows=[
+            ("SEC:AAA", "AAA"),
+            ("SEC:BBB", "BBB"),
+            ("SEC:CCC", "CCC"),
+        ],
+        neighbor_rows=[
+            ("SEC:AAA", "AAA", 1, "BBB", "SEC:BBB", 0.90, 0.10),
+            ("SEC:AAA", "AAA", 2, "CCC", "SEC:CCC", 0.40, 0.60),
+            ("SEC:BBB", "BBB", 1, "AAA", "SEC:AAA", 0.90, 0.10),
+        ],
+        return_rows=[("2025-01-02", {"AAA": 0.01, "BBB": 0.02, "CCC": -0.01})],
+    )
+    _write_metadata_csv(
+        metadata_csv,
+        [
+            {"symbol": "AAA", "sector": "Technology", "industry": "Software"},
+            {"symbol": "BBB", "sector": "Financials", "industry": "Banks"},
+            {"symbol": "CCC", "sector": "", "industry": ""},
+        ],
+    )
+
+    with_controls = write_global_map_view(
+        snapshot,
+        output_dir=tmp_path / "global_with_controls",
+        node_metadata_path=metadata_csv,
+        top_k=2,
+        seed=11,
+        iterations=4,
+    )
+    without_metadata = write_global_map_view(
+        snapshot,
+        output_dir=tmp_path / "global_without_metadata",
+        top_k=2,
+        seed=11,
+        iterations=4,
+    )
+
+    metadata = json.loads(with_controls.metadata_path.read_text(encoding="utf-8"))
+    assert metadata["filter_controls"]["sector_count"] == 3
+    assert metadata["filter_controls"]["industry_count"] == 3
+    assert metadata["filter_controls"]["edge_threshold_control"] == "correlation_minimum"
+    assert _read_csv(with_controls.edges_path) == _read_csv(without_metadata.edges_path)
+
+    html = with_controls.html_path.read_text(encoding="utf-8")
+    assert 'id="sectorFilter"' in html
+    assert 'id="industryFilter"' in html
+    assert 'id="edgeThreshold"' in html
+    assert "passesNodeFilters" in html
+    assert "passesEdgeThreshold" in html
+    assert "Filter/focus controls" in html
+    assert "filter only; not cluster labels" in html
+
+
 def test_global_map_cli_import_does_not_require_numpy_or_pandas():
     code = textwrap.dedent(
         """
@@ -266,7 +407,18 @@ def _write_snapshot(
 
 
 def _write_metadata_csv(path, rows):
-    fieldnames = ["symbol", "name", "sector", "industry", "avg_turnover"]
+    fieldnames = [
+        "symbol",
+        "name",
+        "sector",
+        "industry",
+        "avg_turnover",
+        "market_cap",
+        "market_cap_status",
+        "market_cap_source",
+        "market_cap_currency",
+        "market_cap_label",
+    ]
     with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
         writer.writeheader()

@@ -31,6 +31,10 @@ _NODE_FIELDS = [
     "avg_volume",
     "avg_turnover",
     "market_cap",
+    "market_cap_status",
+    "market_cap_source",
+    "market_cap_currency",
+    "market_cap_label",
     "market_cap_change",
     "community_id",
 ]
@@ -109,6 +113,8 @@ def write_global_map_view(
         "layout_seed": seed,
         "layout_iterations": iterations,
         "layout_quality": _layout_quality(positions),
+        "market_cap_overlay": _market_cap_overlay_metadata(nodes),
+        "filter_controls": _filter_control_metadata(nodes, edges),
         "top_k": top_k,
         "node_count": len(nodes),
         "edge_count": len(edges),
@@ -118,7 +124,8 @@ def write_global_map_view(
         ),
         "overlay_note": (
             "Distance means return-correlation distance only. Returns, sector, volume, "
-            "volatility, and market cap are nullable overlays."
+            "volatility, and market cap are nullable overlays. Market cap, when present, "
+            "is raw/current/as-of-fetch and is not period-aligned."
         ),
     }
     metadata_path.write_text(
@@ -252,6 +259,12 @@ def _build_nodes(
         period_return = returns.get(symbol)
         if period_return is None:
             period_return = returns.get(security_id.upper())
+        market_cap = _metadata_value(node_metadata, "market_cap")
+        market_cap_status = _market_cap_status(
+            market_cap,
+            _metadata_value(node_metadata, "market_cap_status"),
+            has_metadata=bool(node_metadata),
+        )
         nodes.append(
             {
                 "security_id": security_id,
@@ -267,7 +280,11 @@ def _build_nodes(
                 "volatility": _metadata_value(node_metadata, "volatility"),
                 "avg_volume": _metadata_value(node_metadata, "avg_volume", "volume"),
                 "avg_turnover": _metadata_value(node_metadata, "avg_turnover", "avg_turnover_1y"),
-                "market_cap": _metadata_value(node_metadata, "market_cap"),
+                "market_cap": market_cap if market_cap_status == "positive" else "",
+                "market_cap_status": market_cap_status,
+                "market_cap_source": _metadata_value(node_metadata, "market_cap_source"),
+                "market_cap_currency": _metadata_value(node_metadata, "market_cap_currency", "currency"),
+                "market_cap_label": _metadata_value(node_metadata, "market_cap_label"),
                 "market_cap_change": _metadata_value(node_metadata, "market_cap_change"),
                 "community_id": _metadata_value(node_metadata, "community_id"),
             }
@@ -392,6 +409,66 @@ def _layout_quality(positions: dict[str, tuple[float, float]]) -> dict[str, floa
     }
 
 
+def _market_cap_overlay_metadata(nodes: list[dict[str, Any]]) -> dict[str, Any]:
+    positive = 0
+    zero = 0
+    missing = 0
+    invalid = 0
+    labels: dict[str, int] = {}
+    currencies: dict[str, int] = {}
+    for node in nodes:
+        status = str(node.get("market_cap_status") or "missing")
+        if status == "positive":
+            positive += 1
+        elif status == "zero":
+            zero += 1
+        elif status in {"missing", "missing_raw", "timeout", ""}:
+            missing += 1
+        else:
+            invalid += 1
+        label = str(node.get("market_cap_label") or "").strip()
+        if label:
+            labels[label] = labels.get(label, 0) + 1
+        currency = str(node.get("market_cap_currency") or "").strip()
+        if currency:
+            currencies[currency] = currencies.get(currency, 0) + 1
+    node_count = len(nodes)
+    label = max(labels.items(), key=lambda item: item[1])[0] if labels else "not_provided"
+    currency = max(currencies.items(), key=lambda item: item[1])[0] if currencies else ""
+    return {
+        "label": label,
+        "size_scale": "log_current_market_cap",
+        "positive_count": positive,
+        "zero_count": zero,
+        "missing_count": missing,
+        "invalid_count": invalid,
+        "node_count": node_count,
+        "coverage_rate": positive / node_count if node_count else 0.0,
+        "currency": currency,
+        "note": (
+            "Market-cap size is a nullable current/as-of-fetch overlay. Missing or zero "
+            "market cap is rendered as a neutral outline, not as a tiny company."
+        ),
+    }
+
+
+def _filter_control_metadata(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> dict[str, Any]:
+    sectors = {_filter_value(node.get("sector") or node.get("primary_sector")) for node in nodes}
+    industries = {_filter_value(node.get("industry")) for node in nodes}
+    correlations = [float(edge["correlation"]) for edge in edges if _safe_float(edge.get("correlation")) is not None]
+    return {
+        "sector_count": len(sectors),
+        "industry_count": len(industries),
+        "edge_threshold_control": "correlation_minimum",
+        "edge_correlation_min": min(correlations) if correlations else None,
+        "edge_correlation_max": max(correlations) if correlations else None,
+        "note": (
+            "Sector and industry are filter lenses only; they are not cluster labels "
+            "and do not change relationship distance."
+        ),
+    }
+
+
 def _write_csv(path: Path, fieldnames: list[str], rows: list[dict[str, Any]]) -> None:
     with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
@@ -424,8 +501,13 @@ def _render_html(
     canvas {{ width: 100%; height: min(78vh, 760px); display: block; }}
     #tooltip {{ position: absolute; pointer-events: none; display: none; max-width: 320px; padding: 8px 10px; border: 1px solid #94a3b8; background: rgba(255, 255, 255, 0.96); color: #111827; font-size: 12px; line-height: 1.35; box-shadow: 0 8px 24px rgba(15, 23, 42, 0.16); }}
     .legend {{ display: flex; flex-wrap: wrap; gap: 14px; color: #374151; font-size: 13px; margin: 10px 0 14px; }}
+    .controls {{ display: grid; grid-template-columns: repeat(3, minmax(180px, 1fr)); gap: 10px; align-items: end; margin: 12px 0 14px; padding: 10px; border: 1px solid #d1d5db; background: #f9fafb; }}
+    .controls label {{ display: grid; gap: 4px; color: #374151; font-size: 12px; font-weight: 600; }}
+    .controls select, .controls input {{ min-width: 0; padding: 7px 8px; border: 1px solid #9ca3af; background: #fff; color: #111827; font: inherit; }}
+    #filterStats {{ color: #4b5563; font-size: 12px; grid-column: 1 / -1; }}
     .dot {{ display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 5px; vertical-align: -1px; }}
     code {{ background: #e5e7eb; padding: 1px 4px; }}
+    @media (max-width: 760px) {{ .controls {{ grid-template-columns: 1fr; }} }}
   </style>
 </head>
 <body>
@@ -433,11 +515,26 @@ def _render_html(
   <h1>Global Relationship Map</h1>
   <p>{html.escape(title)}</p>
   <p><strong>Node positions are a fixed reference frame.</strong> They do not mean time movement. Distance means return-correlation distance only; return, sector, industry, volume, volatility, and market cap are overlays.</p>
+  <p><strong>Market-cap size is raw/current/as-of-fetch.</strong> It is not period-aligned market-cap change. Missing or zero market cap is shown as a neutral outline, not as a tiny company.</p>
   <div class="legend">
     <span><span class="dot" style="background:#059669"></span>positive period return</span>
     <span><span class="dot" style="background:#dc2626"></span>negative period return</span>
     <span><span class="dot" style="background:#2563eb"></span>missing return</span>
+    <span>node size = log current market cap when available</span>
+    <span>outline = missing or zero market cap</span>
     <span>lines = saved top-k neighbors</span>
+  </div>
+  <div class="controls" aria-label="Filter/focus controls">
+    <label>Sector filter
+      <select id="sectorFilter" aria-label="Sector filter"></select>
+    </label>
+    <label>Industry filter
+      <select id="industryFilter" aria-label="Industry filter"></select>
+    </label>
+    <label>Minimum edge correlation
+      <input id="edgeThreshold" type="range" min="-1" max="1" step="0.01" value="-1" aria-label="Minimum edge correlation">
+    </label>
+    <div id="filterStats">Filter/focus controls are filter only; not cluster labels.</div>
   </div>
   <div id="mapWrap">
     <canvas id="map" width="1180" height="760" aria-label="Global relationship map canvas"></canvas>
@@ -451,9 +548,49 @@ const metadata = {metadata_json};
 
 const canvas = document.getElementById("map");
 const tooltip = document.getElementById("tooltip");
+const sectorFilter = document.getElementById("sectorFilter");
+const industryFilter = document.getElementById("industryFilter");
+const edgeThreshold = document.getElementById("edgeThreshold");
+const filterStats = document.getElementById("filterStats");
 const ctx = canvas.getContext("2d");
 const nodeBySymbol = new Map(nodes.map((node) => [node.symbol, node]));
+const marketCapLogs = nodes
+  .map((node) => marketCapNumber(node))
+  .filter((value) => Number.isFinite(value) && value > 0)
+  .map((value) => Math.log10(value))
+  .sort((a, b) => a - b);
+const minMarketCapLog = marketCapLogs.length ? marketCapLogs[0] : 0;
+const maxMarketCapLog = marketCapLogs.length ? marketCapLogs[marketCapLogs.length - 1] : 0;
 const padding = 36;
+let selectedSector = "all";
+let selectedIndustry = "all";
+let minEdgeCorrelation = -1;
+
+function filterValue(value) {{
+  const text = String(value || "").trim();
+  return text || "missing";
+}}
+
+function uniqueValues(values) {{
+  return Array.from(new Set(values.map(filterValue))).sort((a, b) => a.localeCompare(b));
+}}
+
+function populateSelect(select, values, label) {{
+  select.innerHTML = "";
+  const allOption = document.createElement("option");
+  allOption.value = "all";
+  allOption.textContent = `All ${{label}}`;
+  select.appendChild(allOption);
+  for (const value of values) {{
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = value;
+    select.appendChild(option);
+  }}
+}}
+
+populateSelect(sectorFilter, uniqueValues(nodes.map((node) => node.sector || node.primary_sector)), "sectors");
+populateSelect(industryFilter, uniqueValues(nodes.map((node) => node.industry)), "industries");
 
 function resizeCanvas() {{
   const ratio = window.devicePixelRatio || 1;
@@ -489,16 +626,58 @@ function edgeAlpha(edge) {{
   return Math.max(0.012, Math.min(0.085, 0.012 + corr * 0.052));
 }}
 
+function marketCapNumber(node) {{
+  if (!node || node.market_cap === "" || node.market_cap === null || node.market_cap === undefined) return NaN;
+  const value = Number(node.market_cap);
+  return Number.isFinite(value) && value > 0 ? value : NaN;
+}}
+
+function marketCapRadius(node) {{
+  const value = marketCapNumber(node);
+  if (!Number.isFinite(value) || maxMarketCapLog <= minMarketCapLog) return 3.1;
+  const scaled = (Math.log10(value) - minMarketCapLog) / (maxMarketCapLog - minMarketCapLog);
+  return 2.6 + Math.sqrt(Math.max(0, Math.min(1, scaled))) * 6.4;
+}}
+
+function hasPositiveMarketCap(node) {{
+  return node.market_cap_status === "positive" && Number.isFinite(marketCapNumber(node));
+}}
+
+function passesNodeFilters(node) {{
+  const sector = filterValue(node.sector || node.primary_sector);
+  const industry = filterValue(node.industry);
+  return (selectedSector === "all" || sector === selectedSector)
+    && (selectedIndustry === "all" || industry === selectedIndustry);
+}}
+
+function passesEdgeThreshold(edge) {{
+  const corr = Number(edge.correlation);
+  return Number.isFinite(corr) && corr >= minEdgeCorrelation;
+}}
+
+function visibleNodeSymbols() {{
+  return new Set(nodes.filter(passesNodeFilters).map((node) => node.symbol));
+}}
+
+function updateFilterStats(visibleSymbols, visibleEdgeCount) {{
+  filterStats.textContent = `Filter/focus controls are filter only; not cluster labels. Showing ${{visibleSymbols.size}}/${{nodes.length}} nodes and ${{visibleEdgeCount}}/${{edges.length}} edges. Minimum edge correlation: ${{minEdgeCorrelation.toFixed(2)}}.`;
+}}
+
 function draw() {{
   const rect = canvas.getBoundingClientRect();
+  const visibleSymbols = visibleNodeSymbols();
+  let visibleEdgeCount = 0;
   ctx.clearRect(0, 0, rect.width, rect.height);
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, rect.width, rect.height);
 
   for (const edge of edges) {{
+    if (!passesEdgeThreshold(edge)) continue;
     const source = nodeBySymbol.get(edge.source_symbol);
     const target = nodeBySymbol.get(edge.target_symbol);
     if (!source || !target) continue;
+    if (!visibleSymbols.has(source.symbol) || !visibleSymbols.has(target.symbol)) continue;
+    visibleEdgeCount += 1;
     const a = project(source);
     const b = project(target);
     ctx.beginPath();
@@ -510,14 +689,23 @@ function draw() {{
   }}
 
   for (const node of nodes) {{
+    if (!visibleSymbols.has(node.symbol)) continue;
     const p = project(node);
+    const radius = marketCapRadius(node);
     ctx.beginPath();
-    ctx.arc(p.x, p.y, 2.9, 0, Math.PI * 2);
+    ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
     ctx.fillStyle = returnColor(node.period_return);
-    ctx.globalAlpha = 0.86;
+    ctx.globalAlpha = hasPositiveMarketCap(node) ? 0.82 : 0.42;
     ctx.fill();
+    if (!hasPositiveMarketCap(node)) {{
+      ctx.globalAlpha = 0.78;
+      ctx.lineWidth = 0.9;
+      ctx.strokeStyle = "#64748b";
+      ctx.stroke();
+    }}
   }}
   ctx.globalAlpha = 1;
+  updateFilterStats(visibleSymbols, visibleEdgeCount);
 }}
 
 function formatPercent(value) {{
@@ -535,6 +723,9 @@ function nodeTitle(node) {{
     `industry: ${{escapeHtml(node.industry || "missing")}}`,
     `avg_turnover: ${{escapeHtml(node.avg_turnover || "missing")}}`,
     `market_cap: ${{escapeHtml(node.market_cap || "missing")}}`,
+    `market_cap_status: ${{escapeHtml(node.market_cap_status || "missing")}}`,
+    `market_cap_currency: ${{escapeHtml(node.market_cap_currency || "missing")}}`,
+    `market_cap_label: ${{escapeHtml(node.market_cap_label || "missing")}}`,
   ].join("<br>");
 }}
 
@@ -553,6 +744,7 @@ canvas.addEventListener("mousemove", (event) => {{
   let best = null;
   let bestDistance = 9;
   for (const node of nodes) {{
+    if (!passesNodeFilters(node)) continue;
     const p = project(node);
     const distance = Math.hypot(p.x - x, p.y - y);
     if (distance < bestDistance) {{
@@ -574,6 +766,21 @@ canvas.addEventListener("mouseleave", () => {{
   tooltip.style.display = "none";
 }});
 
+sectorFilter.addEventListener("change", () => {{
+  selectedSector = sectorFilter.value;
+  draw();
+}});
+
+industryFilter.addEventListener("change", () => {{
+  selectedIndustry = industryFilter.value;
+  draw();
+}});
+
+edgeThreshold.addEventListener("input", () => {{
+  minEdgeCorrelation = Number(edgeThreshold.value);
+  draw();
+}});
+
 window.addEventListener("resize", resizeCanvas);
 resizeCanvas();
 </script>
@@ -588,6 +795,44 @@ def _metadata_value(row: dict[str, str], *names: str) -> str:
         if value is not None and str(value).strip():
             return str(value).strip()
     return ""
+
+
+def _filter_value(value: Any) -> str:
+    text = str(value or "").strip()
+    return text or "missing"
+
+
+def _safe_float(value: Any) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _market_cap_status(value: str, explicit_status: str, *, has_metadata: bool) -> str:
+    status = explicit_status.strip().lower()
+    if status:
+        return status
+    number = _positive_float(value)
+    if number is not None:
+        return "positive"
+    if value.strip():
+        try:
+            if float(value) == 0:
+                return "zero"
+        except ValueError:
+            return "invalid"
+    return "missing" if has_metadata else "missing"
+
+
+def _positive_float(value: str) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if number > 0:
+        return number
+    return None
 
 
 def _optional_float(value: float | None) -> str:

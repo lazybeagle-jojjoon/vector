@@ -155,11 +155,53 @@ PYTHONPATH=src uv run --no-project --with numpy \
   --output-dir outputs/relation_snapshot_us_global_map_2024-01-01_2026-05-22_top10
 ```
 
+To size nodes by raw current market cap, first generate a node metadata CSV from
+existing raw fundamentals:
+
+```bash
+PYTHONPATH=src uv run --no-project \
+  python -m vector_relations.market_cap_metadata_cli \
+  --snapshot outputs/relation_snapshot_us_standard_common_stock_2024-01-01_2026-05-22_minobs400 \
+  --raw-root "$STOCK_DATA_ROOT/paid_db/eodhd_fundamentals_raw" \
+  --market us \
+  --output outputs/relation_snapshot_us_market_cap_metadata_2024_2026.csv \
+  --file-timeout-seconds 2
+```
+
+Then pass it to the global map:
+
+```bash
+PYTHONPATH=src uv run --no-project --with numpy \
+  python -m vector_relations.global_map_cli \
+  --snapshot outputs/relation_snapshot_us_standard_common_stock_2024-01-01_2026-05-22_minobs400 \
+  --node-metadata outputs/relation_snapshot_us_market_cap_metadata_2024_2026.csv \
+  --top-k 10 \
+  --seed 42 \
+  --iterations 80 \
+  --output-dir outputs/relation_snapshot_us_global_map_2024-01-01_2026-05-22_top10_mcap
+```
+
+If you already have a sector/industry metadata CSV, merge it with the market-cap
+metadata before rendering so the HTML filters are useful. The current US
+artifact uses:
+
+```bash
+PYTHONPATH=src uv run --no-project --with numpy \
+  python -m vector_relations.global_map_cli \
+  --snapshot outputs/relation_snapshot_us_standard_common_stock_2024-01-01_2026-05-22_minobs400 \
+  --node-metadata outputs/relation_snapshot_us_node_metadata_sector_mcap_2024_2026.csv \
+  --top-k 10 \
+  --seed 42 \
+  --iterations 80 \
+  --output-dir outputs/relation_snapshot_us_global_map_2024-01-01_2026-05-22_top10_sector_mcap
+```
+
 Optional `--node-metadata path/to/node_metadata.csv` enriches tooltips when a
 CSV keyed by `symbol` or `ticker` is available. Supported nullable overlay
 columns include `name`, `type`, `sector`, `industry`, `primary_sector`,
-`avg_volume`, `avg_turnover`, `volatility`, `market_cap`, and
-`market_cap_change`.
+`avg_volume`, `avg_turnover`, `volatility`, `market_cap`,
+`market_cap_status`, `market_cap_source`, `market_cap_currency`,
+`market_cap_label`, and `market_cap_change`.
 
 Global map outputs:
 
@@ -173,6 +215,17 @@ axis system and not a period-to-period movement model. Relationship distance
 still means return-correlation distance only; return, sector, volume,
 volatility, and market cap are overlays.
 
+Market-cap node size is raw/current/as-of-fetch from fundamentals
+`Highlights.MarketCapitalization`. It is not period-aligned market-cap change.
+Missing or zero market cap is rendered as a neutral outline and counted in
+`global_map_metadata.json`. The timeout option is useful when Google Drive raw
+JSON hydration is slow; timed-out rows are treated as missing overlay data.
+
+The HTML includes filter/focus controls for sector, industry, and minimum edge
+correlation. These controls hide visual clutter only; they do not recompute the
+layout, recompute neighbors, rename clusters, or change the return-correlation
+relationship.
+
 ## Interpretation Limits
 
 - `entered` and `exited` can reflect relationship changes, universe membership changes, or both.
@@ -181,8 +234,11 @@ volatility, and market cap are overlays.
 - Ego network panels are local top-k redraws, not full-market maps, clustering, or 3D views.
 - The global map uses one fixed layout for a single snapshot. Do not read node
   position as time movement, sector identity, or investment meaning.
+- Market-cap node size is meaningful only within one market/currency map. Do
+  not compare raw USD and KRW node sizes in one combined map.
+- Sector and industry controls are filters, not taxonomy or cluster labels.
 - PCA, coordinate alignment, clustering, sector taxonomy, fund/CEF classification, and interactive comparison UI are Later Ideas.
-- US/KR market-cap history is not currently available in `global_market_cap_daily` or `global_shares_outstanding_events`; market-cap period comparison is deferred until that data contract exists.
+- US/KR market-cap history is not currently available in `global_market_cap_daily` or `global_shares_outstanding_events`; market-cap period comparison is deferred until that data contract exists. Current/as-of-fetch size overlays can be generated from raw fundamentals, but they are not period-change data.
 
 See `ANALYSIS_INDEX.md` for the generated artifact map and current observations.
 
