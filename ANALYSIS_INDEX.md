@@ -8,6 +8,8 @@ This index describes local generated artifacts under `outputs/`. Those artifacts
 
 Read these first:
 
+- `outputs/relation_snapshot_us_reading_guide_2020_2026.md`
+  Best entry point for the current artifact set: reading order, trusted reads, caveated reads, and stop line.
 - `outputs/relation_snapshot_us_period_group_review_2020_2026_top10.md`  
   Manual analyst note for curated groups: hotel REITs, homebuilders, Argentina ADRs, regional banks, gold/silver miners, uranium names. This is not a generated taxonomy or classifier.
 - `outputs/relation_snapshot_us_period_global_highlights_2020_2026_top10.md`  
@@ -103,10 +105,12 @@ Important limits:
 
 ## Strongest Current Observations
 
+- Reading guide: use the current artifact set for manual reading, and do not add more automation without a new data-contract item or explicit new question.
 - Hotel REITs and homebuilders are very stable, economically coherent clusters.
-- Argentina ADRs are also highly stable across the direct comparison.
+- Argentina ADRs and uranium are the cleanest tightening reads in the current manual notes.
+- Regional banks and energy/oil gas look more like recomposition reads than simple tightening reads.
+- Healthcare payers and megacap tech remain caveated by weakening peers, membership churn, and residual CEF/source-classification issues.
 - Regional banks are coherent but show more turnover than hotel REITs/homebuilders.
-- Uranium names have moderate Jaccard stability, but several stayed pairs moved much closer.
 - `BAC` is stable among the hand-picked ticker examples.
 - `AAPL`, `MSFT`, and `NVDA` show high top-k turnover over the long direct comparison.
 - `UNH` retains several healthcare peers, but stayed distances moved materially farther.
