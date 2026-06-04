@@ -226,6 +226,37 @@ correlation. These controls hide visual clutter only; they do not recompute the
 layout, recompute neighbors, rename clusters, or change the return-correlation
 relationship.
 
+## Global Timeline
+
+Render several saved snapshots on the same frozen global-map layout:
+
+```bash
+PYTHONPATH=src uv run --no-project \
+  python -m vector_relations.global_timeline_cli \
+  --reference-map outputs/relation_snapshot_us_global_map_2024-01-01_2026-05-22_top10_sector_mcap \
+  --snapshot outputs/relation_snapshot_us_standard_common_stock_2020-01-01_2021-12-31_minobs350 \
+  --snapshot outputs/relation_snapshot_us_standard_common_stock_2022-01-01_2023-12-31_minobs350 \
+  --snapshot outputs/relation_snapshot_us_standard_common_stock_2024-01-01_2026-05-22_minobs400 \
+  --top-k 10 \
+  --output-dir outputs/relation_snapshot_us_global_timeline_2020_2026_top10_fixed_2024_layout
+```
+
+Timeline outputs:
+
+- `global_timeline_metadata.json`
+- `global_timeline_nodes.csv`
+- `global_timeline_edges.csv`
+- `global_timeline_frames.json`
+- `global_timeline.html`
+
+The timeline reuses `global_layout.csv` from the reference map. In the example
+above, that means the 2024-2026 layout is the reference frame and the earlier
+periods are overlaid onto it. Nodes keep the same coordinates in every panel;
+only each frame's saved top-k edges, period return colors, and tooltips change.
+If a reference-layout node is missing from a frame's universe, it stays visible
+as a neutral missing marker with no frame edges. Do not read timeline panels as
+node movement.
+
 ## Interpretation Limits
 
 - `entered` and `exited` can reflect relationship changes, universe membership changes, or both.
@@ -237,6 +268,10 @@ relationship.
 - Market-cap node size is meaningful only within one market/currency map. Do
   not compare raw USD and KRW node sizes in one combined map.
 - Sector and industry controls are filters, not taxonomy or cluster labels.
+- The global timeline is a fixed-frame small multiple. Position is reused from
+  the reference map; compare edges, colors, and tooltip values, not coordinate
+  movement. If the reference map is 2024-2026, earlier periods are overlays on
+  that frame rather than independently laid-out maps.
 - PCA, coordinate alignment, clustering, sector taxonomy, fund/CEF classification, and interactive comparison UI are Later Ideas.
 - US/KR market-cap history is not currently available in `global_market_cap_daily` or `global_shares_outstanding_events`; market-cap period comparison is deferred until that data contract exists. Current/as-of-fetch size overlays can be generated from raw fundamentals, but they are not period-change data.
 
