@@ -11,6 +11,31 @@ The project is intentionally narrow:
 
 This is a research/inspection tool, not a trading recommendation system.
 
+## How To Read Results
+
+Read "close" as "moved together during this period." It does not mean the
+stocks are good, in the same sector, or likely to keep moving together.
+
+Trust the numeric tables first:
+
+- `neighbors.csv` shows each ticker's closest return-correlation neighbors.
+- `neighbor_changes.csv` shows which top-k neighbors stayed, entered, or exited
+  between saved snapshots.
+- `distance_changes.csv` shows rank, distance, and correlation changes for
+  those stayed/entered/exited top-k relationships.
+
+Use `scatter.html` as a quick visual aid only. The axes are anchor-distance
+axes for one final-period snapshot, not a semantic market map and not a
+period-to-period movement chart.
+
+Current US readout highlights:
+
+- Hotel REITs and homebuilders are stable, intuitive control groups.
+- Argentina ADRs and uranium names are the cleanest tightening examples.
+- Regional banks and energy/oil gas look more like peer-set recomposition.
+- Healthcare payers and megacap tech need caution because of membership churn
+  and residual CEF/source-classification issues.
+
 ## Data Contract
 
 The current pipeline expects a local `stock_data` tree with:
@@ -86,11 +111,42 @@ Comparison outputs:
 
 The comparison reads top-k `neighbors.csv` rows only. It does not scan every pair in `distances.csv`.
 
+## Render An Ego Network
+
+Render a static one-symbol relationship view from existing snapshot and comparison outputs:
+
+```bash
+PYTHONPATH=src uv run --no-project \
+  python -m vector_relations.ego_cli \
+  --snapshot outputs/relation_snapshot_us_standard_common_stock_2020-01-01_2021-12-31_minobs350 \
+  --snapshot outputs/relation_snapshot_us_standard_common_stock_2024-01-01_2026-05-22_minobs400 \
+  --comparison-dir outputs/relation_snapshot_us_period_comparison_2020_2026_direct_all_symbols_top10 \
+  --symbol HUT \
+  --top-k 10 \
+  --output-dir outputs/relation_snapshot_us_ego_hut_2020_2026
+```
+
+The center symbol is generic; use any symbol present in the saved snapshots.
+The view does not recompute relationships and does not use the center symbol as
+a projection anchor. It redraws existing top-k neighbors as a local network:
+
+- edge color shows baseline/current/stayed/entered/exited status when a
+  comparison directory is provided,
+- edge strength still comes from return-correlation distance,
+- node color is a period-return overlay from existing `returns.csv`,
+- each panel is its own static view, not an animation of coordinates moving
+  through time.
+
+Use the same `--top-k` for the comparison output and ego view when possible.
+If the ego view asks for more neighbors than the comparison classified, those
+extra current-panel edges stay gray as `current`.
+
 ## Interpretation Limits
 
 - `entered` and `exited` can reflect relationship changes, universe membership changes, or both.
 - Residual source-data classification issues can remain. In the current US v1 artifact, some CEF-like names are marked as `Common Stock` upstream.
 - The scatter plot is a single-period visual aid, not a period-to-period coordinate movement model.
+- Ego network panels are local top-k redraws, not full-market maps, clustering, or 3D views.
 - PCA, coordinate alignment, clustering, sector taxonomy, fund/CEF classification, and interactive comparison UI are Later Ideas.
 - US/KR market-cap history is not currently available in `global_market_cap_daily` or `global_shares_outstanding_events`; market-cap period comparison is deferred until that data contract exists.
 
