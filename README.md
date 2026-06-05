@@ -319,6 +319,18 @@ The full US 2020-2026 6-month monthly-stride run currently writes about a few
 megabytes of summary output; storing every monthly full correlation/distance
 matrix would be tens of gigabytes and is intentionally not the default.
 
+Render a static heatmap twin of the rolling tables:
+
+```bash
+PYTHONPATH=src python -m vector_relations.rolling_structure_report_cli \
+  outputs/relation_snapshot_us_sector_structure_rolling_6m_2020_2026
+```
+
+The report writes `rolling_structure_report.html` and includes a same-window
+market baseline before the sector heatmaps. Several sectors tightening at once
+can reflect a broad correlation regime rather than sector-specific structure;
+read the heatmaps against that baseline.
+
 ## Interpretation Limits
 
 - `entered` and `exited` can reflect relationship changes, universe membership changes, or both.
@@ -339,6 +351,8 @@ matrix would be tens of gigabytes and is intentionally not the default.
   windows are not independent samples.
 - In rolling structure outputs, the `missing` group is a source metadata gap
   bucket, not a real sector or industry.
+- The rolling structure report is a mechanical heatmap of existing scanner
+  tables. It does not add event narratives, lead-lag claims, or predictions.
 - PCA, coordinate alignment, clustering, sector taxonomy, fund/CEF classification, and interactive comparison UI are Later Ideas.
 - US/KR market-cap history is not currently available in `global_market_cap_daily` or `global_shares_outstanding_events`; market-cap period comparison is deferred until that data contract exists. Current/as-of-fetch size overlays can be generated from raw fundamentals, but they are not period-change data.
 
