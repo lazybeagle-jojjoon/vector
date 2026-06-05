@@ -73,6 +73,8 @@ def test_threshold_sweep_writes_market_normalized_ratios_and_report(tmp_path):
 
     html = outputs.html_path.read_text(encoding="utf-8")
     assert "Threshold Sweep Report" in html
+    assert "Market regime density line chart" in html
+    assert "<polyline" in html
     assert "Market strong-edge baseline" in html
     assert "baseline-normalized ratio" in html
     assert "fixed thresholds are zoom levels" in html

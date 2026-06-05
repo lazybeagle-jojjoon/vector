@@ -383,6 +383,9 @@ def _render_html(
         "<h1>Threshold Sweep Report</h1>",
         "<p class=\"note\">This report is descriptive only, not investment advice, not a forecast, and not a recommendation.</p>",
         "<p class=\"note\">fixed thresholds are zoom levels. Raw counts are market-regime sensitive; use baseline-normalized ratio for cross-window reading.</p>",
+        "<h2>Market regime density line chart</h2>",
+        "<p>Read this first: spikes mean many pairs crossed the fixed threshold in the same window.</p>",
+        _market_regime_chart(market_rows),
         "<h2>Market strong-edge baseline</h2>",
         "<p>Market baseline is the share of all finite pairs with correlation at or above each threshold.</p>",
         _market_table(market_rows),
@@ -411,6 +414,61 @@ def _render_html(
         "</main></body></html>",
     ]
     return "\n".join(lines)
+
+
+def _market_regime_chart(rows: list[dict[str, Any]]) -> str:
+    by_threshold: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        by_threshold.setdefault(str(row["threshold"]), []).append(row)
+    thresholds = sorted(by_threshold, key=float)
+    all_values = [
+        _number(row.get("market_strong_edge_ratio")) or 0.0
+        for threshold in thresholds
+        for row in by_threshold[threshold]
+    ]
+    max_value = max(all_values) if all_values else 0.0
+    if max_value <= 0:
+        max_value = 1.0
+
+    width = 980
+    height = 260
+    padding_left = 56
+    padding_right = 24
+    padding_top = 24
+    padding_bottom = 46
+    plot_width = width - padding_left - padding_right
+    plot_height = height - padding_top - padding_bottom
+    colors = ["#0f766e", "#2563eb", "#b45309", "#9333ea", "#be123c"]
+    chart_parts = [
+        '<div class="chart-wrap">',
+        f'<svg class="regime-chart" viewBox="0 0 {width} {height}" role="img" aria-label="Market strong-edge density by threshold">',
+        f'<line x1="{padding_left}" y1="{padding_top}" x2="{padding_left}" y2="{height - padding_bottom}" class="axis"/>',
+        f'<line x1="{padding_left}" y1="{height - padding_bottom}" x2="{width - padding_right}" y2="{height - padding_bottom}" class="axis"/>',
+        f'<text x="8" y="{padding_top + 4}" class="axis-label">{html.escape(_format_percent(max_value))}</text>',
+        f'<text x="8" y="{height - padding_bottom}" class="axis-label">0.0%</text>',
+    ]
+    for index, threshold in enumerate(thresholds):
+        series = sorted(by_threshold[threshold], key=lambda row: int(row["frame_index"]))
+        points = []
+        denominator = max(len(series) - 1, 1)
+        for point_index, row in enumerate(series):
+            value = _number(row.get("market_strong_edge_ratio")) or 0.0
+            x = padding_left + (point_index / denominator) * plot_width
+            y = padding_top + (1.0 - (value / max_value)) * plot_height
+            points.append(f"{x:.2f},{y:.2f}")
+        color = colors[index % len(colors)]
+        chart_parts.append(
+            f'<polyline points="{" ".join(points)}" fill="none" stroke="{color}" '
+            'stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>'
+        )
+        legend_x = padding_left + index * 120
+        legend_y = height - 14
+        chart_parts.append(f'<circle cx="{legend_x}" cy="{legend_y - 4}" r="4" fill="{color}"/>')
+        chart_parts.append(
+            f'<text x="{legend_x + 8}" y="{legend_y}" class="legend">corr&gt;={html.escape(threshold)}</text>'
+        )
+    chart_parts.extend(["</svg>", "</div>"])
+    return "".join(chart_parts)
 
 
 def _market_table(rows: list[dict[str, Any]]) -> str:
@@ -467,6 +525,21 @@ def _validate_thresholds(thresholds: list[float] | tuple[float, ...]) -> list[fl
     if invalid:
         raise ValueError("thresholds must be between -1 and 1.")
     return values
+
+
+def _number(value: Any) -> float | None:
+    try:
+        if value in ("", None):
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _format_percent(value: float | None) -> str:
+    if value is None:
+        return "NA"
+    return f"{value * 100:.1f}%"
 
 
 def _upper_triangle_values(np: Any, corr: Any) -> list[float]:
@@ -559,4 +632,8 @@ h1, h2 { letter-spacing: 0; }
 table { border-collapse: collapse; font-size: 12px; min-width: 100%; }
 th, td { border: 1px solid #e5e9ee; padding: 6px 8px; white-space: nowrap; }
 th { background: #f0f3f6; text-align: left; }
+.chart-wrap { border: 1px solid #d7dde3; background: #fff; margin-bottom: 24px; overflow: auto; }
+.regime-chart { display: block; min-width: 860px; width: 100%; height: auto; }
+.axis { stroke: #9aa4af; stroke-width: 1; }
+.axis-label, .legend { fill: #46515c; font-size: 12px; }
 """

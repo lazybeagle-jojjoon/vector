@@ -356,7 +356,9 @@ PYTHONPATH=src uv run --no-project --with duckdb --with pandas --with pyarrow --
 The threshold sweep treats fixed thresholds as zoom levels. Its main columns are
 same-window market strong-edge density and group/cross strong-edge density
 divided by that market baseline. Raw threshold counts are regime-sensitive and
-should not be read as sector structure without that normalization.
+should not be read as sector structure without that normalization. The HTML
+report starts with a market regime density line chart; read that context before
+the sector and cross-sector tables.
 
 ## Interpretation Limits
 
