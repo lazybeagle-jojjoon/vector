@@ -257,6 +257,68 @@ If a reference-layout node is missing from a frame's universe, it stays visible
 as a neutral missing marker with no frame edges. Do not read timeline panels as
 node movement.
 
+## Rolling Structure Scanner
+
+Summarize descriptive sector/industry structure tables. The scanner has two
+input modes.
+
+Mode 1 reads saved relationship snapshots:
+
+```bash
+PYTHONPATH=src uv run --no-project --with pandas --with numpy \
+  python -m vector_relations.rolling_structure_cli \
+  --snapshot outputs/relation_snapshot_us_standard_common_stock_2020-01-01_2021-12-31_minobs350 \
+  --snapshot outputs/relation_snapshot_us_standard_common_stock_2022-01-01_2023-12-31_minobs350 \
+  --snapshot outputs/relation_snapshot_us_standard_common_stock_2024-01-01_2026-05-22_minobs400 \
+  --node-metadata outputs/relation_snapshot_us_node_metadata_sector_mcap_2024_2026.csv \
+  --group-column sector \
+  --top-percentile 0.05 \
+  --absolute-correlation-threshold 0.5 \
+  --output-dir outputs/relation_snapshot_us_sector_structure_2020_2026
+```
+
+Mode 2 reads prices directly and computes rolling windows in memory. This is
+the preferred mode for monthly 6-month rolling scans because it writes only the
+small summary tables, not per-window `correlations.csv` or `distances.csv`:
+
+```bash
+PYTHONPATH=src uv run --no-project --with duckdb --with pandas --with pyarrow --with numpy \
+  python -m vector_relations.rolling_structure_cli \
+  --data-root "$STOCK_DATA_ROOT" \
+  --market US \
+  --rolling-start 2020-01-01 \
+  --rolling-end 2026-05-22 \
+  --window-months 6 \
+  --stride-months 1 \
+  --price-column adjusted_close \
+  --min-observations 60 \
+  --universe-scope standard \
+  --security-type-scope common-stock \
+  --max-securities 7000 \
+  --group-column sector \
+  --top-percentile 0.05 \
+  --absolute-correlation-threshold 0.5 \
+  --output-dir outputs/relation_snapshot_us_sector_structure_rolling_6m_2020_2026
+```
+
+Scanner outputs:
+
+- `rolling_structure_metadata.json`
+- `group_summary.csv`
+- `cross_group_summary.csv`
+- `group_deltas.csv`
+- `cross_group_deltas.csv`
+- `rolling_structure_summary.md`
+
+This scanner is descriptive only. It summarizes structure inside each saved
+or rolling window: group mean period return, internal mean correlation, regime-relative
+top-percentile strong edges, absolute `corr>=0.5` counts, cross-group links, and
+adjacent-window deltas. It does not align structure at one date with future
+returns, and it does not produce investment candidates or recommendations.
+The full US 2020-2026 6-month monthly-stride run currently writes about a few
+megabytes of summary output; storing every monthly full correlation/distance
+matrix would be tens of gigabytes and is intentionally not the default.
+
 ## Interpretation Limits
 
 - `entered` and `exited` can reflect relationship changes, universe membership changes, or both.
@@ -272,6 +334,11 @@ node movement.
   the reference map; compare edges, colors, and tooltip values, not coordinate
   movement. If the reference map is 2024-2026, earlier periods are overlays on
   that frame rather than independently laid-out maps.
+- The rolling structure scanner is historical and descriptive. It must not be
+  read as a forecast, recommendation, or strategy backtest. Overlapping rolling
+  windows are not independent samples.
+- In rolling structure outputs, the `missing` group is a source metadata gap
+  bucket, not a real sector or industry.
 - PCA, coordinate alignment, clustering, sector taxonomy, fund/CEF classification, and interactive comparison UI are Later Ideas.
 - US/KR market-cap history is not currently available in `global_market_cap_daily` or `global_shares_outstanding_events`; market-cap period comparison is deferred until that data contract exists. Current/as-of-fetch size overlays can be generated from raw fundamentals, but they are not period-change data.
 
