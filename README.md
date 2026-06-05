@@ -447,6 +447,36 @@ The dashboard joins same-window component metrics with adjacent-window overlap
 status. The default `--min-size 5` keeps two-stock pairs from dominating the
 table. It does not align component structure with future returns.
 
+Build a same-window component-to-component relationship table:
+
+```bash
+PYTHONPATH=src uv run --no-project --with duckdb --with pandas --with pyarrow --with numpy \
+  python -m vector_relations.component_pair_summary_cli \
+  --data-root "$STOCK_DATA_ROOT" \
+  --market US \
+  --rolling-start 2020-01-01 \
+  --rolling-end 2026-05-22 \
+  --window-months 6 \
+  --stride-months 1 \
+  --price-column adjusted_close \
+  --min-observations 60 \
+  --universe-scope standard \
+  --security-type-scope common-stock \
+  --max-securities 7000 \
+  --component-threshold 0.7 \
+  --cross-edge-threshold 0.5 \
+  --min-component-size 5 \
+  --min-component-density 0.5 \
+  --top-n-pairs 200 \
+  --output-dir outputs/relation_snapshot_us_component_pairs_6m_2020_2026
+```
+
+This writes `component_pair_summary.csv` and `component_pair_summary.html`.
+Components are defined at `--component-threshold`; cross-component edge density
+must use a lower `--cross-edge-threshold`, because same-threshold edges between
+distinct connected components are structurally absent. Pair rows are undirected,
+same-window summaries only.
+
 ## Interpretation Limits
 
 - `entered` and `exited` can reflect relationship changes, universe membership changes, or both.
@@ -490,6 +520,9 @@ table. It does not align component structure with future returns.
 - Component dashboard rows are a mechanical table view over the component
   summaries. `mean_period_return` is same-window only and must not be read as
   future-return alignment.
+- Component pair summaries measure same-window component-to-component
+  co-movement. They are undirected and do not describe propagation, lead-lag,
+  or one component pulling another later.
 - PCA, coordinate alignment, clustering, sector taxonomy, fund/CEF classification, and interactive comparison UI are Later Ideas.
 - US/KR market-cap history is not currently available in `global_market_cap_daily` or `global_shares_outstanding_events`; market-cap period comparison is deferred until that data contract exists. Current/as-of-fetch size overlays can be generated from raw fundamentals, but they are not period-change data.
 
