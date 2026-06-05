@@ -34,6 +34,7 @@ class ComponentStructureOutputPaths:
     metadata_path: Path
     frame_summary_path: Path
     component_detail_path: Path
+    component_flow_path: Path
     markdown_path: Path
 
 
@@ -72,6 +73,30 @@ _DETAIL_FIELDS = [
     "mean_internal_correlation",
     "mean_period_return",
     "top_symbols",
+]
+
+_FLOW_FIELDS = [
+    "window_months",
+    "threshold",
+    "from_frame_index",
+    "to_frame_index",
+    "from_frame_label",
+    "to_frame_label",
+    "event_type",
+    "source_component_id",
+    "target_component_id",
+    "source_size",
+    "target_size",
+    "overlap_count",
+    "jaccard",
+    "source_retention_ratio",
+    "target_capture_ratio",
+    "source_match_count",
+    "target_match_count",
+    "source_component_density",
+    "target_component_density",
+    "source_top_symbols",
+    "target_top_symbols",
 ]
 
 
@@ -114,6 +139,8 @@ def write_component_structure_from_prices(
     frames: list[dict[str, Any]] = []
     frame_rows: list[dict[str, Any]] = []
     detail_rows: list[dict[str, Any]] = []
+    flow_rows: list[dict[str, Any]] = []
+    previous_components_by_key: dict[tuple[int, str], list[dict[str, Any]]] = {}
     frame_index = 0
     for window_months_value in window_months_values:
         windows = _rolling_windows(
@@ -145,18 +172,26 @@ def write_component_structure_from_prices(
             frames.append(frame["metadata"])
             frame_rows.extend(frame["frame_rows"])
             detail_rows.extend(frame["detail_rows"])
+            for threshold_text, components in frame["component_records_by_threshold"].items():
+                key = (window_months_value, threshold_text)
+                previous_components = previous_components_by_key.get(key)
+                if previous_components is not None:
+                    flow_rows.extend(_component_flow_rows(previous_components, components))
+                previous_components_by_key[key] = components
 
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
     metadata_path = output_path / "component_structure_metadata.json"
     frame_summary_path = output_path / "component_frame_summary.csv"
     component_detail_path = output_path / "component_detail.csv"
+    component_flow_path = output_path / "component_flow_summary.csv"
     markdown_path = output_path / "component_structure_summary.md"
     metadata = {
         "artifact_files": {
             "metadata": metadata_path.name,
             "frame_summary": frame_summary_path.name,
             "component_detail": component_detail_path.name,
+            "component_flow": component_flow_path.name,
             "markdown": markdown_path.name,
         },
         "mode": "descriptive_connected_components",
@@ -179,6 +214,10 @@ def write_component_structure_from_prices(
             "component can be a chained set, so read size with component_density. "
             "Component detail rows are capped; frame_summary contains the full counts."
         ),
+        "flow_interpretation_note": (
+            "Component flow rows use adjacent-window membership overlap only. They are not stable "
+            "component identities, lead-lag signals, forecasts, or recommendations."
+        ),
         "disclaimer": (
             "Descriptive historical structure only; not investment advice, not a forecast, "
             "and not a recommendation."
@@ -191,11 +230,13 @@ def write_component_structure_from_prices(
     )
     _write_csv(frame_summary_path, _FRAME_FIELDS, frame_rows)
     _write_csv(component_detail_path, _DETAIL_FIELDS, detail_rows)
-    markdown_path.write_text(_render_markdown(metadata, frame_rows, detail_rows), encoding="utf-8")
+    _write_csv(component_flow_path, _FLOW_FIELDS, flow_rows)
+    markdown_path.write_text(_render_markdown(metadata, frame_rows, detail_rows, flow_rows), encoding="utf-8")
     return ComponentStructureOutputPaths(
         metadata_path=metadata_path,
         frame_summary_path=frame_summary_path,
         component_detail_path=component_detail_path,
+        component_flow_path=component_flow_path,
         markdown_path=markdown_path,
     )
 
@@ -260,6 +301,7 @@ def _summarize_component_window(
     }
     frame_rows: list[dict[str, Any]] = []
     detail_rows: list[dict[str, Any]] = []
+    component_records_by_threshold: dict[str, list[dict[str, Any]]] = {}
     for threshold in thresholds:
         components = _components_for_threshold(np, matrix, threshold, security_ids)
         non_singletons = [component for component in components if len(component) > 1]
@@ -283,21 +325,30 @@ def _summarize_component_window(
                 "market_strong_edge_ratio": _format_float(market_ratio),
             }
         )
-        for component_index, component in enumerate(non_singletons[:max_components_per_frame], start=1):
-            detail_rows.append(
-                _component_detail_row(
-                    np=np,
-                    matrix=matrix,
-                    security_ids=security_ids,
-                    symbols=symbols,
-                    returns_by_security=returns_by_security,
-                    component=component,
-                    common=common,
-                    threshold=threshold,
-                    component_id=f"C{component_index:02d}",
-                    max_top_symbols=max_top_symbols,
-                )
+        threshold_records: list[dict[str, Any]] = []
+        for component_index, component in enumerate(non_singletons, start=1):
+            component_id = f"C{component_index:02d}"
+            detail_row = _component_detail_row(
+                np=np,
+                matrix=matrix,
+                security_ids=security_ids,
+                symbols=symbols,
+                returns_by_security=returns_by_security,
+                component=component,
+                common=common,
+                threshold=threshold,
+                component_id=component_id,
+                max_top_symbols=max_top_symbols,
             )
+            threshold_records.append(
+                {
+                    **detail_row,
+                    "members": frozenset(security_ids[index] for index in component),
+                }
+            )
+            if component_index <= max_components_per_frame:
+                detail_rows.append(detail_row)
+        component_records_by_threshold[threshold_text] = threshold_records
     return {
         "metadata": {
             "frame_index": frame_index,
@@ -310,6 +361,115 @@ def _summarize_component_window(
         },
         "frame_rows": frame_rows,
         "detail_rows": detail_rows,
+        "component_records_by_threshold": component_records_by_threshold,
+    }
+
+
+def _component_flow_rows(
+    previous_components: list[dict[str, Any]],
+    current_components: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    min_jaccard = 0.1
+    source_matches: dict[str, list[dict[str, Any]]] = {}
+    target_matches: dict[str, list[dict[str, Any]]] = {}
+    for source in previous_components:
+        source_id = str(source["component_id"])
+        source_matches[source_id] = []
+        source_members = source["members"]
+        for target in current_components:
+            target_members = target["members"]
+            overlap = len(source_members & target_members)
+            union = len(source_members | target_members)
+            jaccard = _ratio(overlap, union)
+            if jaccard < min_jaccard:
+                continue
+            match = {
+                "source": source,
+                "target": target,
+                "overlap": overlap,
+                "jaccard": jaccard,
+            }
+            source_matches[source_id].append(match)
+            target_matches.setdefault(str(target["component_id"]), []).append(match)
+        source_matches[source_id].sort(
+            key=lambda match: (-match["jaccard"], -match["overlap"], str(match["target"]["component_id"]))
+        )
+
+    rows: list[dict[str, Any]] = []
+    for source in previous_components:
+        matches = source_matches.get(str(source["component_id"]), [])
+        if not matches:
+            rows.append(_flow_row(source=source, target=None, event_type="ended", source_match_count=0, target_match_count=0))
+            continue
+        best = matches[0]
+        target = best["target"]
+        source_match_count = len(matches)
+        target_match_count = len(target_matches.get(str(target["component_id"]), []))
+        if source_match_count > 1 and target_match_count > 1:
+            event_type = "reconfigured"
+        elif source_match_count > 1:
+            event_type = "split"
+        elif target_match_count > 1:
+            event_type = "merged"
+        else:
+            event_type = "continued"
+        rows.append(
+            _flow_row(
+                source=source,
+                target=target,
+                event_type=event_type,
+                overlap=best["overlap"],
+                jaccard=best["jaccard"],
+                source_match_count=source_match_count,
+                target_match_count=target_match_count,
+            )
+        )
+
+    matched_targets = {str(match["target"]["component_id"]) for matches in source_matches.values() for match in matches}
+    for target in current_components:
+        if str(target["component_id"]) in matched_targets:
+            continue
+        rows.append(_flow_row(source=None, target=target, event_type="new", source_match_count=0, target_match_count=0))
+    return rows
+
+
+def _flow_row(
+    *,
+    source: dict[str, Any] | None,
+    target: dict[str, Any] | None,
+    event_type: str,
+    overlap: int = 0,
+    jaccard: float = 0.0,
+    source_match_count: int,
+    target_match_count: int,
+) -> dict[str, Any]:
+    anchor = source if source is not None else target
+    if anchor is None:
+        raise ValueError("flow row needs a source or target component.")
+    source_size = int(source["size"]) if source is not None else 0
+    target_size = int(target["size"]) if target is not None else 0
+    return {
+        "window_months": anchor["window_months"],
+        "threshold": anchor["threshold"],
+        "from_frame_index": source["frame_index"] if source is not None else "",
+        "to_frame_index": target["frame_index"] if target is not None else "",
+        "from_frame_label": source["frame_label"] if source is not None else "",
+        "to_frame_label": target["frame_label"] if target is not None else "",
+        "event_type": event_type,
+        "source_component_id": source["component_id"] if source is not None else "",
+        "target_component_id": target["component_id"] if target is not None else "",
+        "source_size": source_size,
+        "target_size": target_size,
+        "overlap_count": overlap,
+        "jaccard": _format_float(jaccard),
+        "source_retention_ratio": _format_float(_ratio(overlap, source_size)),
+        "target_capture_ratio": _format_float(_ratio(overlap, target_size)),
+        "source_match_count": source_match_count,
+        "target_match_count": target_match_count,
+        "source_component_density": source["component_density"] if source is not None else "",
+        "target_component_density": target["component_density"] if target is not None else "",
+        "source_top_symbols": source["top_symbols"] if source is not None else "",
+        "target_top_symbols": target["top_symbols"] if target is not None else "",
     }
 
 
@@ -384,7 +544,10 @@ def _union(parent: list[int], rank: list[int], left: int, right: int) -> None:
 
 
 def _render_markdown(
-    metadata: dict[str, Any], frame_rows: list[dict[str, Any]], detail_rows: list[dict[str, Any]]
+    metadata: dict[str, Any],
+    frame_rows: list[dict[str, Any]],
+    detail_rows: list[dict[str, Any]],
+    flow_rows: list[dict[str, Any]],
 ) -> str:
     lines = [
         "# Connected Component Structure",
@@ -395,6 +558,8 @@ def _render_markdown(
         "",
         "Components use single-linkage connectivity: a large component can be a chained set, not a fully similar blob.",
         "Read component size together with component_density. Component detail rows are capped; frame-level counts are complete.",
+        "",
+        "Component flow rows use adjacent-window membership overlap only; they are not stable component identities.",
         "",
         "## Largest frame-level component shares",
     ]
@@ -420,6 +585,27 @@ def _render_markdown(
             f"- {row['window_months']}m {row['frame_label']} corr>={row['threshold']} "
             f"{row['component_id']}: size {row['size']}, density {row['component_density']}, "
             f"top symbols {row['top_symbols']}"
+        )
+    lines.extend(["", "## Strong adjacent-window component flows"])
+    ranked_flows = sorted(
+        [
+            row
+            for row in flow_rows
+            if row.get("event_type") in {"continued", "split", "merged", "reconfigured"}
+        ],
+        key=lambda row: (
+            float(row.get("jaccard") or 0),
+            int(row.get("overlap_count") or 0),
+        ),
+        reverse=True,
+    )[:12]
+    for row in ranked_flows:
+        lines.append(
+            f"- {row['window_months']}m corr>={row['threshold']} {row['event_type']}: "
+            f"{row['from_frame_label']} {row['source_component_id']} -> "
+            f"{row['to_frame_label']} {row['target_component_id']}; "
+            f"jaccard {row['jaccard']}, overlap {row['overlap_count']}; "
+            f"source top {row['source_top_symbols']}"
         )
     lines.extend(
         [

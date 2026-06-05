@@ -428,6 +428,10 @@ Connected components use single-linkage connectivity, so a large component can
 be a chained set rather than one uniformly similar group. Read size together
 with `component_density`; detail rows are capped while frame-level counts remain
 complete.
+It also writes `component_flow_summary.csv`, a descriptive adjacent-window
+membership-overlap table for `continued`, `split`, `merged`, `ended`, and `new`
+events. These are not stable cluster ids and do not imply lead-lag, forecasts,
+or recommendations.
 
 ## Interpretation Limits
 
@@ -466,6 +470,9 @@ complete.
 - Connected components can chain through pairwise links. Large size alone does
   not mean every member is similar; use `component_density` and the market
   strong-edge ratio as context.
+- Component flow rows compare adjacent windows by membership overlap only.
+  They describe historical maintain/split/merge/new/ended structure, not
+  stable identities, lead-lag, signals, or recommendations.
 - PCA, coordinate alignment, clustering, sector taxonomy, fund/CEF classification, and interactive comparison UI are Later Ideas.
 - US/KR market-cap history is not currently available in `global_market_cap_daily` or `global_shares_outstanding_events`; market-cap period comparison is deferred until that data contract exists. Current/as-of-fetch size overlays can be generated from raw fundamentals, but they are not period-change data.
 

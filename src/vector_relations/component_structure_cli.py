@@ -35,6 +35,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(f"Wrote component metadata: {outputs.metadata_path}")
     print(f"Wrote component frame summary: {outputs.frame_summary_path}")
     print(f"Wrote component detail: {outputs.component_detail_path}")
+    print(f"Wrote component flow: {outputs.component_flow_path}")
     print(f"Wrote component markdown: {outputs.markdown_path}")
     return 0
 

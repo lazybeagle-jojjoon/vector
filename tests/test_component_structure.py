@@ -8,7 +8,7 @@ import textwrap
 import pytest
 
 from vector_relations.component_structure import write_component_structure_from_prices
-from vector_relations.component_structure_cli import run
+from vector_relations.component_structure_cli import main, run
 
 
 def test_component_structure_writes_threshold_components_without_labels(tmp_path):
@@ -45,6 +45,7 @@ def test_component_structure_writes_threshold_components_without_labels(tmp_path
         "metadata",
         "frame_summary",
         "component_detail",
+        "component_flow",
         "markdown",
     }
     assert "not a forecast" in metadata["disclaimer"]
@@ -114,6 +115,95 @@ def test_component_structure_cli_writes_outputs(tmp_path):
     assert outputs.metadata_path.exists()
     assert outputs.frame_summary_path.exists()
     assert outputs.component_detail_path.exists()
+    assert outputs.component_flow_path.exists()
+
+
+def test_component_structure_cli_main_prints_flow_output(tmp_path, capsys):
+    pd = pytest.importorskip("pandas")
+    prices = _price_frame(
+        pd,
+        {
+            "SEC:A1": ("A1", [100, 101, 102, 103, 104, 105, 106, 107]),
+            "SEC:A2": ("A2", [50, 50.5, 51, 51.5, 52, 52.5, 53, 53.5]),
+        },
+    )
+    price_csv = tmp_path / "prices.csv"
+    prices.to_csv(price_csv, index=False)
+
+    result = main(
+        [
+            "--prices-csv",
+            str(price_csv),
+            "--market",
+            "US",
+            "--rolling-start",
+            "2020-01-01",
+            "--rolling-end",
+            "2020-04-30",
+            "--window-months",
+            "2",
+            "--stride-months",
+            "1",
+            "--min-observations",
+            "2",
+            "--thresholds",
+            "0.99999",
+            "--output-dir",
+            str(tmp_path / "components"),
+        ]
+    )
+
+    output = capsys.readouterr().out
+    assert result == 0
+    assert "Wrote component flow:" in output
+
+
+def test_component_structure_writes_membership_flow_without_stable_ids(tmp_path):
+    pd = pytest.importorskip("pandas")
+    prices = _price_frame_from_window_returns(
+        pd,
+        {
+            "SEC:A1": ("A1", [[0.01, 0.02, 0.01], [0.03, -0.01, 0.02]]),
+            "SEC:A2": ("A2", [[0.01, 0.02, 0.01], [0.03, -0.01, 0.02]]),
+            "SEC:B1": ("B1", [[-0.01, -0.02, -0.01], [0.03, -0.01, 0.02]]),
+            "SEC:B2": ("B2", [[-0.01, -0.02, -0.01], [0.03, -0.01, 0.02]]),
+        },
+    )
+
+    outputs = write_component_structure_from_prices(
+        prices=prices,
+        output_dir=tmp_path / "components",
+        market="US",
+        rolling_start="2020-01-01",
+        rolling_end="2020-04-30",
+        window_months=2,
+        stride_months=2,
+        price_column="adjusted_close",
+        min_observations=2,
+        thresholds=[0.99],
+        max_components_per_frame=10,
+    )
+
+    metadata = json.loads(outputs.metadata_path.read_text(encoding="utf-8"))
+    assert metadata["artifact_files"]["component_flow"] == "component_flow_summary.csv"
+    assert "membership overlap" in metadata["flow_interpretation_note"]
+    assert "not stable component identities" in metadata["flow_interpretation_note"]
+
+    flow_rows = _read_csv(outputs.component_flow_path)
+    merged_rows = [row for row in flow_rows if row["event_type"] == "merged"]
+    assert len(merged_rows) == 2
+    assert {row["source_component_id"] for row in merged_rows} == {"C01", "C02"}
+    assert {row["target_component_id"] for row in merged_rows} == {"C01"}
+    assert {row["jaccard"] for row in merged_rows} == {"0.5"}
+    assert {row["overlap_count"] for row in merged_rows} == {"2"}
+    assert all(row["target_match_count"] == "2" for row in merged_rows)
+    markdown = outputs.markdown_path.read_text(encoding="utf-8")
+    assert "membership overlap" in markdown
+    assert "not stable component identities" in markdown
+    assert "Strong adjacent-window component flows" in markdown
+    assert "merged" in markdown
+    assert "No community naming, taxonomy, lead-lag" in markdown
+    assert "not investment advice" in markdown
 
 
 def test_component_structure_cli_import_is_pandas_free():
@@ -161,6 +251,36 @@ def _price_frame(pd, prices_by_security):
                     "adjusted_close": price,
                 }
             )
+    return pd.DataFrame(rows)
+
+
+def _price_frame_from_window_returns(pd, returns_by_security):
+    window_dates = [
+        pd.to_datetime(["2020-01-01", "2020-01-15", "2020-02-01", "2020-02-15"]),
+        pd.to_datetime(["2020-03-01", "2020-03-15", "2020-04-01", "2020-04-15"]),
+    ]
+    rows = []
+    for security_id, (symbol, window_returns) in returns_by_security.items():
+        price = 100.0
+        for dates, returns in zip(window_dates, window_returns, strict=True):
+            rows.append(
+                {
+                    "security_id": security_id,
+                    "symbol": symbol,
+                    "date": dates[0].strftime("%Y-%m-%d"),
+                    "adjusted_close": price,
+                }
+            )
+            for date, value in zip(dates[1:], returns, strict=True):
+                price *= 1.0 + value
+                rows.append(
+                    {
+                        "security_id": security_id,
+                        "symbol": symbol,
+                        "date": date.strftime("%Y-%m-%d"),
+                        "adjusted_close": price,
+                    }
+                )
     return pd.DataFrame(rows)
 
 
