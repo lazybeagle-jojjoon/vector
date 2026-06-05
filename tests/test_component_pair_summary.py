@@ -45,6 +45,7 @@ def test_component_pair_summary_measures_same_window_cross_relationships(tmp_pat
     assert metadata["relationship"] == "return_correlation"
     assert metadata["component_threshold"] == 0.99
     assert metadata["cross_edge_threshold"] == 0.5
+    assert metadata["min_component_density"] == 0.5
     assert "same-window" in metadata["interpretation_note"]
     assert "not a forecast" in metadata["disclaimer"]
 

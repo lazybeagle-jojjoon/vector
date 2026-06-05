@@ -90,7 +90,7 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     parser.add_argument("--component-threshold", type=float, default=0.7)
     parser.add_argument("--cross-edge-threshold", type=float, default=0.5)
     parser.add_argument("--min-component-size", type=int, default=5)
-    parser.add_argument("--min-component-density", type=float, default=0.0)
+    parser.add_argument("--min-component-density", type=float, default=0.5)
     parser.add_argument("--min-cross-pair-count", type=int, default=10)
     parser.add_argument("--top-n-pairs", type=int, default=200)
     parser.add_argument("--max-top-symbols", type=int, default=12)

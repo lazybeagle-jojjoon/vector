@@ -87,7 +87,7 @@ def write_component_pair_summary_from_prices(
     component_threshold: float = 0.7,
     cross_edge_threshold: float = 0.5,
     min_component_size: int = 5,
-    min_component_density: float = 0.0,
+    min_component_density: float = 0.5,
     min_cross_pair_count: int = 10,
     top_n_pairs: int = 200,
     max_top_symbols: int = 12,
