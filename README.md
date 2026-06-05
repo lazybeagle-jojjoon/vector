@@ -401,6 +401,30 @@ window sweep. "Durable" means high same-window normalized ratio in the 12-month
 view after count guards; "transient" means high same-window normalized ratio in
 the 6-month view outside that durable set. These are reading aids, not signals.
 
+Build unnamed connected components from thresholded return-correlation graphs:
+
+```bash
+PYTHONPATH=src uv run --no-project --with duckdb --with pandas --with pyarrow --with numpy \
+  python -m vector_relations.component_structure_cli \
+  --data-root "$STOCK_DATA_ROOT" \
+  --market US \
+  --rolling-start 2020-01-01 \
+  --rolling-end 2026-05-22 \
+  --window-months 6 \
+  --stride-months 1 \
+  --price-column adjusted_close \
+  --min-observations 60 \
+  --universe-scope standard \
+  --security-type-scope common-stock \
+  --max-securities 7000 \
+  --thresholds 0.5,0.6,0.7 \
+  --output-dir outputs/relation_snapshot_us_component_structure_6m_2020_2026
+```
+
+This writes frame-level component counts and component details only. Component
+ids such as `C01` are local to one window and threshold; they are not sector
+names, stable identities, forecasts, or recommendations.
+
 ## Interpretation Limits
 
 - `entered` and `exited` can reflect relationship changes, universe membership changes, or both.
@@ -432,6 +456,9 @@ the 6-month view outside that durable set. These are reading aids, not signals.
 - Window flow readouts classify durable/transient rows only inside the existing
   descriptive window sweep. They are not independent confirmations, signals,
   or recommendations.
+- Connected-component outputs use unnamed local ids (`C01`, `C02`, ...). They
+  do not perform community detection, taxonomy naming, time tracking, lead-lag,
+  or prediction.
 - PCA, coordinate alignment, clustering, sector taxonomy, fund/CEF classification, and interactive comparison UI are Later Ideas.
 - US/KR market-cap history is not currently available in `global_market_cap_daily` or `global_shares_outstanding_events`; market-cap period comparison is deferred until that data contract exists. Current/as-of-fetch size overlays can be generated from raw fundamentals, but they are not period-change data.
 
