@@ -384,22 +384,26 @@ def _render_html(
         "<p class=\"note\">This report is descriptive only, not investment advice, not a forecast, and not a recommendation.</p>",
         "<p class=\"note\">fixed thresholds are zoom levels. Raw counts are market-regime sensitive; use baseline-normalized ratio for cross-window reading.</p>",
         "<h2>Market regime density line chart</h2>",
-        "<p>Read this first: spikes mean many pairs crossed the fixed threshold in the same window.</p>",
+        "<p>Read this first: shaded windows are the highest market-density decile; spikes mean many pairs crossed the fixed threshold in the same window.</p>",
         _market_regime_chart(market_rows),
         "<h2>Market strong-edge baseline</h2>",
         "<p>Market baseline is the share of all finite pairs with correlation at or above each threshold.</p>",
         _market_table(market_rows),
         "<h2>Sector internal normalized ratios</h2>",
+        "<p>Read ratios with member and edge counts. A high ratio from very few pairs can be unstable.</p>",
         _summary_table(
             group_rows,
             key_fields=["threshold", "group_name"],
+            support_fields=["member_count", "internal_pair_count", "internal_strong_edge_count"],
             value_field="internal_strong_edge_ratio_normalized",
             max_rows=80,
         ),
         "<h2>Cross-sector normalized ratios</h2>",
+        "<p>Read cross ratios with pair and edge counts. They describe same-window structure only.</p>",
         _summary_table(
             cross_rows,
             key_fields=["threshold", "group_a", "group_b"],
+            support_fields=["cross_pair_count", "cross_strong_edge_count"],
             value_field="cross_strong_edge_ratio_normalized",
             max_rows=120,
         ),
@@ -409,6 +413,7 @@ def _render_html(
         f"<li>Thresholds: {html.escape(', '.join(thresholds))}</li>",
         f"<li>Frames: {html.escape(str(len(frames)))}</li>",
         "<li>baseline-normalized ratio = group/cross strong-edge density divided by same-window market strong-edge density.</li>",
+        "<li>When same-window market density is small, normalized ratios can be noisy; check raw edge counts and member/pair counts before interpreting.</li>",
         "<li>Do not align this structure-at-t output with future returns in this report.</li>",
         "</ul>",
         "</main></body></html>",
@@ -439,14 +444,29 @@ def _market_regime_chart(rows: list[dict[str, Any]]) -> str:
     plot_width = width - padding_left - padding_right
     plot_height = height - padding_top - padding_bottom
     colors = ["#0f766e", "#2563eb", "#b45309", "#9333ea", "#be123c"]
+    stress_indices = _stress_frame_indices(by_threshold)
+    frame_count = max((len(rows) for rows in by_threshold.values()), default=0)
+    denominator = max(frame_count - 1, 1)
+    band_width = plot_width / max(frame_count, 1)
     chart_parts = [
         '<div class="chart-wrap">',
         f'<svg class="regime-chart" viewBox="0 0 {width} {height}" role="img" aria-label="Market strong-edge density by threshold">',
+    ]
+    for frame_index in stress_indices:
+        x = padding_left + (frame_index / denominator) * plot_width - band_width / 2
+        x = max(padding_left, min(x, width - padding_right - band_width))
+        chart_parts.append(
+            f'<rect class="stress-window" x="{x:.2f}" y="{padding_top}" '
+            f'width="{band_width:.2f}" height="{plot_height}"/>'
+        )
+    chart_parts.extend(
+        [
         f'<line x1="{padding_left}" y1="{padding_top}" x2="{padding_left}" y2="{height - padding_bottom}" class="axis"/>',
         f'<line x1="{padding_left}" y1="{height - padding_bottom}" x2="{width - padding_right}" y2="{height - padding_bottom}" class="axis"/>',
         f'<text x="8" y="{padding_top + 4}" class="axis-label">{html.escape(_format_percent(max_value))}</text>',
         f'<text x="8" y="{height - padding_bottom}" class="axis-label">0.0%</text>',
-    ]
+        ]
+    )
     for index, threshold in enumerate(thresholds):
         series = sorted(by_threshold[threshold], key=lambda row: int(row["frame_index"]))
         points = []
@@ -471,6 +491,21 @@ def _market_regime_chart(rows: list[dict[str, Any]]) -> str:
     return "".join(chart_parts)
 
 
+def _stress_frame_indices(by_threshold: dict[str, list[dict[str, Any]]]) -> set[int]:
+    max_by_frame: dict[int, float] = {}
+    for rows in by_threshold.values():
+        for row in rows:
+            frame_index = int(row["frame_index"])
+            value = _number(row.get("market_strong_edge_ratio")) or 0.0
+            max_by_frame[frame_index] = max(max_by_frame.get(frame_index, 0.0), value)
+    if not max_by_frame:
+        return set()
+    values = sorted(max_by_frame.values())
+    cutoff_index = max(0, int(len(values) * 0.9) - 1)
+    cutoff = values[cutoff_index]
+    return {frame_index for frame_index, value in max_by_frame.items() if value >= cutoff and value > 0}
+
+
 def _market_table(rows: list[dict[str, Any]]) -> str:
     return _plain_table(
         rows,
@@ -490,6 +525,7 @@ def _summary_table(
     rows: list[dict[str, Any]],
     *,
     key_fields: list[str],
+    support_fields: list[str],
     value_field: str,
     max_rows: int,
 ) -> str:
@@ -498,7 +534,7 @@ def _summary_table(
         key=lambda row: float(row[value_field]),
         reverse=True,
     )[:max_rows]
-    fields = ["frame_label", *key_fields, value_field, "market_strong_edge_ratio"]
+    fields = ["frame_label", *key_fields, *support_fields, value_field, "market_strong_edge_ratio"]
     return _plain_table(ranked, fields=fields, max_rows=max_rows)
 
 
@@ -635,5 +671,6 @@ th { background: #f0f3f6; text-align: left; }
 .chart-wrap { border: 1px solid #d7dde3; background: #fff; margin-bottom: 24px; overflow: auto; }
 .regime-chart { display: block; min-width: 860px; width: 100%; height: auto; }
 .axis { stroke: #9aa4af; stroke-width: 1; }
+.stress-window { fill: #f97316; opacity: 0.12; }
 .axis-label, .legend { fill: #46515c; font-size: 12px; }
 """
