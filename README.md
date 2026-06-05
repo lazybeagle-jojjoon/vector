@@ -331,6 +331,33 @@ market baseline before the sector heatmaps. Several sectors tightening at once
 can reflect a broad correlation regime rather than sector-specific structure;
 read the heatmaps against that baseline.
 
+Run a fixed-threshold zoom sweep:
+
+```bash
+PYTHONPATH=src uv run --no-project --with duckdb --with pandas --with pyarrow --with numpy \
+  python -m vector_relations.rolling_threshold_sweep_cli \
+  --data-root "$STOCK_DATA_ROOT" \
+  --market US \
+  --rolling-start 2020-01-01 \
+  --rolling-end 2026-05-22 \
+  --window-months 6 \
+  --stride-months 1 \
+  --price-column adjusted_close \
+  --min-observations 60 \
+  --universe-scope standard \
+  --security-type-scope common-stock \
+  --max-securities 7000 \
+  --group-column sector \
+  --thresholds 0.5,0.6,0.7 \
+  --top-percentile 0.05 \
+  --output-dir outputs/relation_snapshot_us_threshold_sweep_6m_2020_2026
+```
+
+The threshold sweep treats fixed thresholds as zoom levels. Its main columns are
+same-window market strong-edge density and group/cross strong-edge density
+divided by that market baseline. Raw threshold counts are regime-sensitive and
+should not be read as sector structure without that normalization.
+
 ## Interpretation Limits
 
 - `entered` and `exited` can reflect relationship changes, universe membership changes, or both.
@@ -353,6 +380,9 @@ read the heatmaps against that baseline.
   bucket, not a real sector or industry.
 - The rolling structure report is a mechanical heatmap of existing scanner
   tables. It does not add event narratives, lead-lag claims, or predictions.
+- The threshold sweep treats `corr>=0.5/0.6/0.7` as descriptive zoom filters.
+  Use baseline-normalized ratios for cross-window interpretation; raw counts
+  can mostly reflect the market-wide correlation regime.
 - PCA, coordinate alignment, clustering, sector taxonomy, fund/CEF classification, and interactive comparison UI are Later Ideas.
 - US/KR market-cap history is not currently available in `global_market_cap_daily` or `global_shares_outstanding_events`; market-cap period comparison is deferred until that data contract exists. Current/as-of-fetch size overlays can be generated from raw fundamentals, but they are not period-change data.
 
