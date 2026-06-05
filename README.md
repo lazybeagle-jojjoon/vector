@@ -433,6 +433,20 @@ membership-overlap table for `continued`, `split`, `merged`, `ended`, and `new`
 events. These are not stable cluster ids and do not imply lead-lag, forecasts,
 or recommendations.
 
+Build a 0.7-focused descriptive dashboard from those component outputs:
+
+```bash
+PYTHONPATH=src python3 -m vector_relations.component_dashboard_cli \
+  outputs/relation_snapshot_us_component_structure_6m_2020_2026 \
+  --threshold 0.7 \
+  --min-size 5 \
+  --top-n 200
+```
+
+The dashboard joins same-window component metrics with adjacent-window overlap
+status. The default `--min-size 5` keeps two-stock pairs from dominating the
+table. It does not align component structure with future returns.
+
 ## Interpretation Limits
 
 - `entered` and `exited` can reflect relationship changes, universe membership changes, or both.
@@ -473,6 +487,9 @@ or recommendations.
 - Component flow rows compare adjacent windows by membership overlap only.
   They describe historical maintain/split/merge/new/ended structure, not
   stable identities, lead-lag, signals, or recommendations.
+- Component dashboard rows are a mechanical table view over the component
+  summaries. `mean_period_return` is same-window only and must not be read as
+  future-return alignment.
 - PCA, coordinate alignment, clustering, sector taxonomy, fund/CEF classification, and interactive comparison UI are Later Ideas.
 - US/KR market-cap history is not currently available in `global_market_cap_daily` or `global_shares_outstanding_events`; market-cap period comparison is deferred until that data contract exists. Current/as-of-fetch size overlays can be generated from raw fundamentals, but they are not period-change data.
 
