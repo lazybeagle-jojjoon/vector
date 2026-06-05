@@ -115,6 +115,8 @@ def test_threshold_sweep_cli_writes_outputs(tmp_path):
             "2020-04-30",
             "--window-months",
             "2",
+            "--window-months-list",
+            "2,3",
             "--stride-months",
             "1",
             "--min-observations",
@@ -130,6 +132,63 @@ def test_threshold_sweep_cli_writes_outputs(tmp_path):
 
     assert outputs.metadata_path.exists()
     assert outputs.html_path.exists()
+    metadata = json.loads(outputs.metadata_path.read_text(encoding="utf-8"))
+    assert metadata["window_months_values"] == [2, 3]
+
+
+def test_threshold_sweep_can_compare_multiple_window_lengths(tmp_path):
+    pd = pytest.importorskip("pandas")
+    metadata_csv = tmp_path / "node_metadata.csv"
+    _write_metadata(
+        metadata_csv,
+        [
+            ("A1", "Alpha"),
+            ("A2", "Alpha"),
+            ("B1", "Beta"),
+            ("B2", "Beta"),
+        ],
+    )
+    prices = _price_frame(
+        pd,
+        {
+            "SEC:A1": ("A1", [100, 101, 103, 106, 108, 111, 114, 116]),
+            "SEC:A2": ("A2", [50, 50.5, 51.5, 53, 54, 55.5, 57, 58]),
+            "SEC:B1": ("B1", [80, 79, 78, 78.5, 79, 80, 80.5, 81]),
+            "SEC:B2": ("B2", [30, 29.5, 29, 29.2, 29.4, 29.8, 30.0, 30.2]),
+        },
+    )
+
+    outputs = write_threshold_sweep_from_prices(
+        prices=prices,
+        output_dir=tmp_path / "window-sweep",
+        node_metadata_path=metadata_csv,
+        market="US",
+        rolling_start="2020-01-01",
+        rolling_end="2020-04-30",
+        window_months=2,
+        window_months_list=[2, 3],
+        stride_months=1,
+        price_column="adjusted_close",
+        min_observations=2,
+        group_column="sector",
+        thresholds=[0.5],
+        top_percentile=0.25,
+    )
+
+    metadata = json.loads(outputs.metadata_path.read_text(encoding="utf-8"))
+    assert metadata["mode"] == "descriptive_threshold_window_sweep"
+    assert metadata["window_months_values"] == [2, 3]
+    assert "one-axis window-length comparison" in metadata["interpretation_note"]
+
+    market_rows = _read_csv(outputs.market_summary_path)
+    assert {row["window_months"] for row in market_rows} == {"2", "3"}
+
+    html = outputs.html_path.read_text(encoding="utf-8")
+    assert "Window length comparison" in html
+    assert "2-month windows" in html
+    assert "3-month windows" in html
+    assert "3-month windows are noisier" in html
+    assert "12-month windows are smoother" in html
 
 
 def test_threshold_sweep_cli_import_is_pandas_free():

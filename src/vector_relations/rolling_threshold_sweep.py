@@ -31,6 +31,8 @@ class ThresholdSweepOutputPaths:
 
 _MARKET_FIELDS = [
     "frame_index",
+    "window_frame_index",
+    "window_months",
     "frame_label",
     "period_start",
     "period_end",
@@ -43,6 +45,8 @@ _MARKET_FIELDS = [
 
 _GROUP_FIELDS = [
     "frame_index",
+    "window_frame_index",
+    "window_months",
     "frame_label",
     "period_start",
     "period_end",
@@ -60,6 +64,8 @@ _GROUP_FIELDS = [
 
 _CROSS_FIELDS = [
     "frame_index",
+    "window_frame_index",
+    "window_months",
     "frame_label",
     "period_start",
     "period_end",
@@ -85,6 +91,7 @@ def write_threshold_sweep_from_prices(
     rolling_start: str,
     rolling_end: str,
     window_months: int = 6,
+    window_months_list: list[int] | tuple[int, ...] | None = None,
     stride_months: int = 1,
     price_column: str = "adjusted_close",
     min_observations: int = 60,
@@ -100,21 +107,12 @@ def write_threshold_sweep_from_prices(
         raise ValueError("top_percentile must be between 0 and 1.")
     if min_observations < 2:
         raise ValueError("min_observations must be at least 2.")
+    window_months_values = _window_months_values(window_months, window_months_list)
     _require_columns(prices, {"security_id", "symbol", "date", price_column}, "prices")
     if metadata_by_symbol is None:
         if node_metadata_path is None:
             raise ValueError("Provide node_metadata_path or metadata_by_symbol.")
         metadata_by_symbol = _read_node_metadata(Path(node_metadata_path))
-
-    windows = _rolling_windows(
-        pd,
-        rolling_start=rolling_start,
-        rolling_end=rolling_end,
-        window_months=window_months,
-        stride_months=stride_months,
-    )
-    if not windows:
-        raise ValueError("no complete rolling windows fit inside the requested date range.")
 
     prepared = prices.copy()
     prepared["_rolling_date"] = pd.to_datetime(prepared["date"], errors="coerce")
@@ -127,25 +125,39 @@ def write_threshold_sweep_from_prices(
     market_rows: list[dict[str, Any]] = []
     group_rows: list[dict[str, Any]] = []
     cross_rows: list[dict[str, Any]] = []
-    for frame_index, (period_start, period_end) in enumerate(windows):
-        frame = _summarize_window(
-            pd=pd,
-            np=np,
-            prices=prepared,
-            frame_index=frame_index,
-            period_start=period_start,
-            period_end=period_end,
-            price_column=price_column,
-            min_observations=min_observations,
-            metadata_by_symbol=metadata_by_symbol,
-            group_column=group_column,
-            thresholds=thresholds,
-            top_percentile=top_percentile,
+    frame_index = 0
+    for window_months_value in window_months_values:
+        windows = _rolling_windows(
+            pd,
+            rolling_start=rolling_start,
+            rolling_end=rolling_end,
+            window_months=window_months_value,
+            stride_months=stride_months,
         )
-        frames.append(frame["metadata"])
-        market_rows.extend(frame["market_rows"])
-        group_rows.extend(frame["group_rows"])
-        cross_rows.extend(frame["cross_rows"])
+        if not windows:
+            raise ValueError("no complete rolling windows fit inside the requested date range.")
+        for window_frame_index, (period_start, period_end) in enumerate(windows):
+            frame = _summarize_window(
+                pd=pd,
+                np=np,
+                prices=prepared,
+                frame_index=frame_index,
+                window_frame_index=window_frame_index,
+                window_months=window_months_value,
+                period_start=period_start,
+                period_end=period_end,
+                price_column=price_column,
+                min_observations=min_observations,
+                metadata_by_symbol=metadata_by_symbol,
+                group_column=group_column,
+                thresholds=thresholds,
+                top_percentile=top_percentile,
+            )
+            frame_index += 1
+            frames.append(frame["metadata"])
+            market_rows.extend(frame["market_rows"])
+            group_rows.extend(frame["group_rows"])
+            cross_rows.extend(frame["cross_rows"])
 
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
@@ -162,12 +174,17 @@ def write_threshold_sweep_from_prices(
             "cross_group_summary": cross_group_summary_path.name,
             "html": html_path.name,
         },
-        "mode": "descriptive_threshold_sweep",
+        "mode": (
+            "descriptive_threshold_window_sweep"
+            if len(window_months_values) > 1
+            else "descriptive_threshold_sweep"
+        ),
         "relationship": "return_correlation_distance",
         "market": market.upper(),
         "rolling_start": rolling_start,
         "rolling_end": rolling_end,
         "window_months": window_months,
+        "window_months_values": window_months_values,
         "stride_months": stride_months,
         "price_column": price_column,
         "min_observations": min_observations,
@@ -177,8 +194,9 @@ def write_threshold_sweep_from_prices(
         "frame_count": len(frames),
         "frames": frames,
         "interpretation_note": (
-            "Fixed thresholds are zoom levels. Cross-window interpretation should use "
-            "baseline-normalized ratios, because raw strong-edge counts move with the "
+            "Fixed thresholds are zoom levels. This is a one-axis window-length comparison "
+            "when multiple window_months_values are present; all other interpretation should "
+            "use baseline-normalized ratios, because raw strong-edge counts move with the "
             "market-wide correlation regime."
         ),
         "brightline": (
@@ -222,6 +240,8 @@ def _summarize_window(
     np: Any,
     prices: Any,
     frame_index: int,
+    window_frame_index: int,
+    window_months: int,
     period_start: str,
     period_end: str,
     price_column: str,
@@ -279,6 +299,8 @@ def _summarize_window(
     frame_label = f"{period_start} to {period_end}"
     common = {
         "frame_index": str(frame_index),
+        "window_frame_index": str(window_frame_index),
+        "window_months": str(window_months),
         "frame_label": frame_label,
         "period_start": period_start,
         "period_end": period_end,
@@ -348,6 +370,8 @@ def _summarize_window(
     return {
         "metadata": {
             "frame_index": frame_index,
+            "window_frame_index": window_frame_index,
+            "window_months": window_months,
             "frame_label": frame_label,
             "period_start": period_start,
             "period_end": period_end,
@@ -369,6 +393,7 @@ def _render_html(
 ) -> str:
     thresholds = [str(value) for value in metadata["thresholds"]]
     frames = [str(frame["frame_label"]) for frame in metadata["frames"]]
+    window_months_values = [str(value) for value in metadata.get("window_months_values", [])]
     lines = [
         "<!doctype html>",
         '<html lang="en">',
@@ -385,7 +410,7 @@ def _render_html(
         "<p class=\"note\">fixed thresholds are zoom levels. Raw counts are market-regime sensitive; use baseline-normalized ratio for cross-window reading.</p>",
         "<h2>Market regime density line chart</h2>",
         "<p>Read this first: shaded windows are the highest market-density decile; spikes mean many pairs crossed the fixed threshold in the same window.</p>",
-        _market_regime_chart(market_rows),
+        _market_regime_charts(market_rows),
         "<h2>Market strong-edge baseline</h2>",
         "<p>Market baseline is the share of all finite pairs with correlation at or above each threshold.</p>",
         _market_table(market_rows),
@@ -411,7 +436,9 @@ def _render_html(
         "<ul>",
         f"<li>Relationship: {html.escape(metadata['relationship'])}</li>",
         f"<li>Thresholds: {html.escape(', '.join(thresholds))}</li>",
+        f"<li>Window months: {html.escape(', '.join(window_months_values))}</li>",
         f"<li>Frames: {html.escape(str(len(frames)))}</li>",
+        "<li>Window length comparison changes only the smoothing horizon. 3-month windows are noisier; 12-month windows are smoother and more overlapping.</li>",
         "<li>baseline-normalized ratio = group/cross strong-edge density divided by same-window market strong-edge density.</li>",
         "<li>When same-window market density is small, normalized ratios can be noisy; check raw edge counts and member/pair counts before interpreting.</li>",
         "<li>Do not align this structure-at-t output with future returns in this report.</li>",
@@ -419,6 +446,21 @@ def _render_html(
         "</main></body></html>",
     ]
     return "\n".join(lines)
+
+
+def _market_regime_charts(rows: list[dict[str, Any]]) -> str:
+    by_window: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        by_window.setdefault(str(row.get("window_months", "")), []).append(row)
+    windows = sorted(by_window, key=lambda value: int(value or 0))
+    if len(windows) <= 1:
+        return _market_regime_chart(rows)
+    parts = ['<section class="window-comparison"><h3>Window length comparison</h3>']
+    for window in windows:
+        parts.append(f"<h4>{html.escape(window)}-month windows</h4>")
+        parts.append(_market_regime_chart(by_window[window]))
+    parts.append("</section>")
+    return "".join(parts)
 
 
 def _market_regime_chart(rows: list[dict[str, Any]]) -> str:
@@ -468,7 +510,10 @@ def _market_regime_chart(rows: list[dict[str, Any]]) -> str:
         ]
     )
     for index, threshold in enumerate(thresholds):
-        series = sorted(by_threshold[threshold], key=lambda row: int(row["frame_index"]))
+        series = sorted(
+            by_threshold[threshold],
+            key=lambda row: int(row.get("window_frame_index") or row["frame_index"]),
+        )
         points = []
         denominator = max(len(series) - 1, 1)
         for point_index, row in enumerate(series):
@@ -495,7 +540,7 @@ def _stress_frame_indices(by_threshold: dict[str, list[dict[str, Any]]]) -> set[
     max_by_frame: dict[int, float] = {}
     for rows in by_threshold.values():
         for row in rows:
-            frame_index = int(row["frame_index"])
+            frame_index = int(row.get("window_frame_index") or row["frame_index"])
             value = _number(row.get("market_strong_edge_ratio")) or 0.0
             max_by_frame[frame_index] = max(max_by_frame.get(frame_index, 0.0), value)
     if not max_by_frame:
@@ -510,6 +555,8 @@ def _market_table(rows: list[dict[str, Any]]) -> str:
     return _plain_table(
         rows,
         fields=[
+            "window_months",
+            "window_frame_index",
             "frame_label",
             "threshold",
             "market_pair_count",
@@ -534,7 +581,15 @@ def _summary_table(
         key=lambda row: float(row[value_field]),
         reverse=True,
     )[:max_rows]
-    fields = ["frame_label", *key_fields, *support_fields, value_field, "market_strong_edge_ratio"]
+    fields = [
+        "window_months",
+        "window_frame_index",
+        "frame_label",
+        *key_fields,
+        *support_fields,
+        value_field,
+        "market_strong_edge_ratio",
+    ]
     return _plain_table(ranked, fields=fields, max_rows=max_rows)
 
 
@@ -561,6 +616,16 @@ def _validate_thresholds(thresholds: list[float] | tuple[float, ...]) -> list[fl
     if invalid:
         raise ValueError("thresholds must be between -1 and 1.")
     return values
+
+
+def _window_months_values(
+    window_months: int, window_months_list: list[int] | tuple[int, ...] | None
+) -> list[int]:
+    values = [int(value) for value in (window_months_list or [window_months])]
+    unique = sorted(set(values))
+    if not unique or any(value <= 0 for value in unique):
+        raise ValueError("window months must be positive integers.")
+    return unique
 
 
 def _number(value: Any) -> float | None:

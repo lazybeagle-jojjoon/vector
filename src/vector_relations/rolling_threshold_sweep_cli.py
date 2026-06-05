@@ -19,6 +19,7 @@ def run(argv: Sequence[str] | None = None) -> ThresholdSweepOutputPaths:
         rolling_start=args.rolling_start,
         rolling_end=args.rolling_end,
         window_months=args.window_months,
+        window_months_list=_split_ints(args.window_months_list) if args.window_months_list else None,
         stride_months=args.stride_months,
         price_column=args.price_column,
         min_observations=args.min_observations,
@@ -114,6 +115,10 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     parser.add_argument("--rolling-start", required=True)
     parser.add_argument("--rolling-end", required=True)
     parser.add_argument("--window-months", type=int, default=6)
+    parser.add_argument(
+        "--window-months-list",
+        help="Optional comma-separated window lengths for one-axis smoothing comparison, e.g. 3,6,12.",
+    )
     parser.add_argument("--stride-months", type=int, default=1)
     parser.add_argument("--price-column", default="adjusted_close")
     parser.add_argument("--min-observations", type=int, default=60)
@@ -143,6 +148,10 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
 
 def _split_thresholds(value: str) -> list[float]:
     return [float(item.strip()) for item in value.split(",") if item.strip()]
+
+
+def _split_ints(value: str) -> list[int]:
+    return [int(item.strip()) for item in value.split(",") if item.strip()]
 
 
 def _import_pandas():

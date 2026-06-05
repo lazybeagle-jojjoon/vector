@@ -353,6 +353,29 @@ PYTHONPATH=src uv run --no-project --with duckdb --with pandas --with pyarrow --
   --output-dir outputs/relation_snapshot_us_threshold_sweep_6m_2020_2026
 ```
 
+To compare smoothing horizons without changing the thresholds, time range, or
+grouping, add a window list and write a separate artifact:
+
+```bash
+PYTHONPATH=src uv run --no-project --with duckdb --with pandas --with pyarrow --with numpy \
+  python -m vector_relations.rolling_threshold_sweep_cli \
+  --data-root "$STOCK_DATA_ROOT" \
+  --market US \
+  --rolling-start 2020-01-01 \
+  --rolling-end 2026-05-22 \
+  --window-months-list 6,12 \
+  --stride-months 1 \
+  --price-column adjusted_close \
+  --min-observations 60 \
+  --universe-scope standard \
+  --security-type-scope common-stock \
+  --max-securities 7000 \
+  --group-column sector \
+  --thresholds 0.5,0.6,0.7 \
+  --top-percentile 0.05 \
+  --output-dir outputs/relation_snapshot_us_threshold_window_sweep_6_12m_2020_2026
+```
+
 The threshold sweep treats fixed thresholds as zoom levels. Its main columns are
 same-window market strong-edge density and group/cross strong-edge density
 divided by that market baseline. Raw threshold counts are regime-sensitive and
@@ -361,6 +384,10 @@ report starts with a market regime density line chart; read that context before
 the sector and cross-sector tables. Shaded chart bands mark the highest market
 density windows. Normalized ratios can still be noisy when the baseline is
 small, so read them with the raw edge counts and member/pair counts beside them.
+Window-length sweeps change only the smoothing horizon: shorter windows are
+noisier and longer windows are smoother but more overlapping. A 3-month window
+needs a lower minimum-observation contract and is intentionally not the default
+large-flow command.
 
 ## Interpretation Limits
 
@@ -388,6 +415,8 @@ small, so read them with the raw edge counts and member/pair counts beside them.
   Use baseline-normalized ratios for cross-window interpretation; raw counts
   can mostly reflect the market-wide correlation regime. A high normalized
   ratio from very few raw edges or a small member/pair count is unstable.
+- Window-length sweeps are one-axis descriptive comparisons. Do not change
+  threshold, time range, group granularity, and window length together.
 - PCA, coordinate alignment, clustering, sector taxonomy, fund/CEF classification, and interactive comparison UI are Later Ideas.
 - US/KR market-cap history is not currently available in `global_market_cap_daily` or `global_shares_outstanding_events`; market-cap period comparison is deferred until that data contract exists. Current/as-of-fetch size overlays can be generated from raw fundamentals, but they are not period-change data.
 
