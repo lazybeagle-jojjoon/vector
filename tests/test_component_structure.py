@@ -41,8 +41,16 @@ def test_component_structure_writes_threshold_components_without_labels(tmp_path
     metadata = json.loads(outputs.metadata_path.read_text(encoding="utf-8"))
     assert metadata["mode"] == "descriptive_connected_components"
     assert metadata["relationship"] == "return_correlation"
+    assert set(metadata["artifact_files"]) == {
+        "metadata",
+        "frame_summary",
+        "component_detail",
+        "markdown",
+    }
     assert "not a forecast" in metadata["disclaimer"]
     assert "Connected components are unnamed" in metadata["interpretation_note"]
+    assert "single-linkage" in metadata["interpretation_note"]
+    assert "capped" in metadata["interpretation_note"]
 
     frame_rows = _read_csv(outputs.frame_summary_path)
     first_frame = _find(frame_rows, frame_index="0", threshold="0.99999")
@@ -63,6 +71,8 @@ def test_component_structure_writes_threshold_components_without_labels(tmp_path
     assert "Connected Component Structure" in markdown
     assert "C01" in markdown
     assert "unnamed" in markdown
+    assert "single-linkage" in markdown
+    assert "capped" in markdown
     assert "not investment advice" in markdown
 
 

@@ -424,6 +424,10 @@ PYTHONPATH=src uv run --no-project --with duckdb --with pandas --with pyarrow --
 This writes frame-level component counts and component details only. Component
 ids such as `C01` are local to one window and threshold; they are not sector
 names, stable identities, forecasts, or recommendations.
+Connected components use single-linkage connectivity, so a large component can
+be a chained set rather than one uniformly similar group. Read size together
+with `component_density`; detail rows are capped while frame-level counts remain
+complete.
 
 ## Interpretation Limits
 
@@ -459,6 +463,9 @@ names, stable identities, forecasts, or recommendations.
 - Connected-component outputs use unnamed local ids (`C01`, `C02`, ...). They
   do not perform community detection, taxonomy naming, time tracking, lead-lag,
   or prediction.
+- Connected components can chain through pairwise links. Large size alone does
+  not mean every member is similar; use `component_density` and the market
+  strong-edge ratio as context.
 - PCA, coordinate alignment, clustering, sector taxonomy, fund/CEF classification, and interactive comparison UI are Later Ideas.
 - US/KR market-cap history is not currently available in `global_market_cap_daily` or `global_shares_outstanding_events`; market-cap period comparison is deferred until that data contract exists. Current/as-of-fetch size overlays can be generated from raw fundamentals, but they are not period-change data.
 

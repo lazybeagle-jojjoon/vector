@@ -175,7 +175,9 @@ def write_component_structure_from_prices(
         "interpretation_note": (
             "Connected components are unnamed threshold-defined relationship sets. "
             "C01/C02 ids are local to one window and threshold; do not treat them as "
-            "stable taxonomy labels."
+            "stable taxonomy labels. Components use single-linkage connectivity: a large "
+            "component can be a chained set, so read size with component_density. "
+            "Component detail rows are capped; frame_summary contains the full counts."
         ),
         "disclaimer": (
             "Descriptive historical structure only; not investment advice, not a forecast, "
@@ -390,6 +392,9 @@ def _render_markdown(
         "This is descriptive historical structure only, not investment advice, not a forecast, and not a recommendation.",
         "",
         "Components are unnamed local threshold sets. C01 in one window is not the same identity as C01 in another window.",
+        "",
+        "Components use single-linkage connectivity: a large component can be a chained set, not a fully similar blob.",
+        "Read component size together with component_density. Component detail rows are capped; frame-level counts are complete.",
         "",
         "## Largest frame-level component shares",
     ]
