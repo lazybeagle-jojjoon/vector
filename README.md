@@ -477,6 +477,24 @@ must use a lower `--cross-edge-threshold`, because same-threshold edges between
 distinct connected components are structurally absent. Pair rows are undirected,
 same-window summaries only.
 
+Build a guarded readout from those component-pair rows:
+
+```bash
+PYTHONPATH=src python3 -m vector_relations.component_pair_readout_cli \
+  outputs/relation_snapshot_us_component_pairs_6m_2020_2026 \
+  --min-persistence-windows 2 \
+  --min-mean-cross-correlation 0.55 \
+  --min-cross-edge-density 0.7 \
+  --min-cross-pair-count 25 \
+  --min-component-density 0.5 \
+  --max-market-density 0.1
+```
+
+This writes `component_pair_readout.csv` and `component_pair_readout.html`.
+It keeps only guarded same-window component-pair rows and groups adjacent
+windows by top-symbol overlap. This is a reading aid, not stable identity
+tracking, propagation, lead-lag, or prediction.
+
 ## Interpretation Limits
 
 - `entered` and `exited` can reflect relationship changes, universe membership changes, or both.
@@ -523,6 +541,9 @@ same-window summaries only.
 - Component pair summaries measure same-window component-to-component
   co-movement. They are undirected and do not describe propagation, lead-lag,
   or one component pulling another later.
+- Component pair readouts are stricter reading aids over component-pair rows.
+  Empty output under strict guards is a valid result; it means the observed
+  pairs did not pass the chosen persistence and quality filters.
 - PCA, coordinate alignment, clustering, sector taxonomy, fund/CEF classification, and interactive comparison UI are Later Ideas.
 - US/KR market-cap history is not currently available in `global_market_cap_daily` or `global_shares_outstanding_events`; market-cap period comparison is deferred until that data contract exists. Current/as-of-fetch size overlays can be generated from raw fundamentals, but they are not period-change data.
 
